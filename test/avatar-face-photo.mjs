@@ -35,7 +35,22 @@ test('shader adapters touch head only, preserve prior shading/transport, and pho
  const head={name:'head',userData:{avatarUniforms:{shirt:{value:1}}},onBeforeCompile(shader){shader.fragmentShader+='\noriginalTransport();';},customProgramCacheKey:()=> 'base'},other={name:'body',userData:{}};
  const model={traverse(fn){fn({material:[head,other]});}},photo={private:true};bindWebGLFaceTexture({model},photo);
  const shader={uniforms:{},fragmentShader:'#include <color_fragment>'};head.onBeforeCompile(shader);assert.match(shader.fragmentShader,/originalTransport/);assert.match(shader.fragmentShader,/localFace.rgb/);assert.equal(shader.uniforms.localFacePhoto.value,photo);assert.deepEqual(Object.keys(head.userData.avatarUniforms),['shirt']);assert.equal(other.onBeforeCompile,undefined);
- bindWebGLFaceTexture({model},null);const clear={uniforms:{},fragmentShader:''};head.onBeforeCompile(clear);assert.equal(clear.uniforms.localFacePhoto,undefined);assert.equal(head.customProgramCacheKey(),'base');
+ bindWebGLFaceTexture({model},null);const clear={uniforms:{},fragmentShader:''};head.onBeforeCompile(clear);assert.equal(clear.uniforms.localFacePhoto.value,null);assert.equal(clear.uniforms.localFaceEnabled.value,0);assert.equal(head.customProgramCacheKey(),'base|local-face-photo-v2');
+});
+test('one compiled WebGL shader observes A to B to remove to B through stable sampler/enable uniforms',()=>{
+ const albedo={original:true},A={disposed:false},B={disposed:false};let compiled=0;
+ const head={name:'head',map:albedo,userData:{},onBeforeCompile(){compiled++;},customProgramCacheKey:()=> 'base'};
+ const model={traverse(fn){fn({material:head});}};
+ bindWebGLFaceTexture({model},A);
+ const shader={uniforms:{},fragmentShader:'#include <color_fragment>'};head.onBeforeCompile(shader);
+ const sampler=shader.uniforms.localFacePhoto,enabled=shader.uniforms.localFaceEnabled,key=head.customProgramCacheKey();
+ assert.equal(sampler.value,A);assert.equal(enabled.value,1);head.needsUpdate=false;
+ bindWebGLFaceTexture({model},B);A.disposed=true;
+ assert.equal(sampler.value,B);assert.equal(sampler.value.disposed,false);assert.equal(enabled.value,1);
+ bindWebGLFaceTexture({model},null);assert.equal(sampler.value,albedo);assert.equal(enabled.value,0);
+ bindWebGLFaceTexture({model},B);assert.equal(sampler.value,B);assert.equal(enabled.value,1);
+ assert.equal(shader.uniforms.localFacePhoto,sampler);assert.equal(shader.uniforms.localFaceEnabled,enabled);assert.equal(compiled,1);assert.equal(head.customProgramCacheKey(),key);assert.equal(head.needsUpdate,false);
+ assert.match(shader.fragmentShader,/if\(localFaceEnabled>0.5\)/);
 });
 test('caller pixels may be released or mutated immediately; later model refresh retains private copy',async()=>{
  const g=await source('stock-player'),input={...marker,data:marker.data.slice()},atlases=[];let resolve;

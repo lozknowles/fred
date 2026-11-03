@@ -29,3 +29,30 @@ test('local persistence accepts only normalized bounded PNG, never original/path
  assert.throws(()=>removeFacePhoto({removeItem(){throw Error('quota');}}),/quota/);
  assert.equal(loadFacePhoto({getItem(){throw Error('denied');}}),null);
 });
+
+// Synthetic runtime callbacks exercise transactional sequencing without a DOM.
+const { commitAvatarDraft } = await import('../src/player/AvatarChooser.js');
+test('photo writes/removals wait until media and rig have succeeded',async()=>{
+ for(const operation of ['save','remove']) {
+  const events=[]; let release; const loading=new Promise(resolve=>release=resolve);
+  const work=commitAvatarDraft({ready:async()=>{events.push('media');},apply:async()=>{events.push('rig-start');await loading;events.push('rig-ready');},persist:()=>events.push(operation),restore:async()=>events.push('restore')});
+  await new Promise(resolve=>setImmediate(resolve)); assert.deepEqual(events,['media','rig-start']);
+  release(); await work; assert.deepEqual(events,['media','rig-start','rig-ready',operation]);
+ }
+});
+test('failed rig/media preserves saved photo and restores previous runtime before cancellation',async()=>{
+ for(const failure of ['media','rig']) {
+  let saved='old-photo',live='draft'; const events=[];
+  await assert.rejects(commitAvatarDraft({ready:async()=>{if(failure==='media') throw Error('decode');},apply:async()=>{throw Error('rig');},persist:()=>{saved='draft-photo';},restore:async()=>{events.push('restore');live='old-photo';}}),/Could not load/);
+  // Cancel has nothing durable to undo after the failed save.
+  assert.equal(saved,'old-photo'); assert.equal(live,'old-photo'); assert.deepEqual(events,['restore']);
+ }
+});
+test('storage quota failure preserves saved data and restores old live photo',async()=>{
+ let saved='old-photo',live='draft-photo';
+ await assert.rejects(commitAvatarDraft({ready:async()=>{},apply:async()=>{},persist:()=>{throw Error('quota');},restore:async()=>{live=saved;}}),/previous saved photo was restored/);
+ assert.equal(saved,'old-photo'); assert.equal(live,'old-photo');
+});
+test('failed rollback is disclosed without claiming preview success',async()=>{
+ await assert.rejects(commitAvatarDraft({ready:async()=>{},apply:async()=>{throw Error('load');},persist:()=>assert.fail('must not persist'),restore:async()=>{throw Error('restore');}}),/preview could not be restored/);
+});

@@ -68,11 +68,12 @@ function promoteTextures(current,next){
 /** A candidate owns one in-flight promotion, shared by all instances of an asset. */
 export function createRepositoryTextureTiers({read,parse=inspectAndLoadAsset,dispose=disposeAssetScene,onLoaded=()=>{}}={}){
  const records=new Map(),controller=new AbortController();let disposed=false,busy=false,plannedBytes=0,pending=Promise.resolve();
- const stats={eligible:0,requests:0,verifiedBytes:0,promotions:0,failures:0};
+ const stats={eligible:0,requests:0,verifiedBytes:0,promotions:0,failures:0,retainedSourceBytes:0};
+ const releaseSource=r=>{if(r.bytes){stats.retainedSourceBytes-=r.bytes.byteLength;r.bytes=null;}};
  return {stats,
   register(asset,bytes,loaded,positions){
    const refs=textureTierReferences(asset);if(!refs.length||!read)return;
-   let record=records.get(asset.id);if(!record){plannedBytes+=refs.reduce((sum,ref)=>sum+ref.bytes,0);if(plannedBytes>MAX_TIER_BYTES)throw Error('Texture tier candidate byte budget exceeded');record={refs,bytes,loaded,positions:[],level:0,failed:false};records.set(asset.id,record);stats.eligible++;}
+   let record=records.get(asset.id);if(!record){plannedBytes+=refs.reduce((sum,ref)=>sum+ref.bytes,0);if(plannedBytes>MAX_TIER_BYTES)throw Error('Texture tier candidate byte budget exceeded');record={refs,bytes,loaded,positions:[],level:0,failed:false};records.set(asset.id,record);stats.eligible++;stats.retainedSourceBytes+=bytes.byteLength;}
    record.positions.push(...positions);
   },
   update(camera){
@@ -87,13 +88,13 @@ export function createRepositoryTextureTiers({read,parse=inspectAndLoadAsset,dis
       const bytes=await readVerifiedTextureTier(read,ref,r.bytes,controller.signal);stats.verifiedBytes+=bytes.length;
       loaded=await parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));
       if(disposed){dispose(loaded.scene);return;}
-      promoteTextures(r.loaded,loaded);onLoaded(loaded);loaded=null;r.level++;stats.promotions++;
-     }catch(error){if(loaded)dispose(loaded.scene);if(!disposed){r.failed=true;stats.failures++;r.error=error.message;}}
+      promoteTextures(r.loaded,loaded);onLoaded(loaded);loaded=null;r.level++;stats.promotions++;if(r.level===r.refs.length)releaseSource(r);
+     }catch(error){if(loaded)dispose(loaded.scene);releaseSource(r);if(!disposed){r.failed=true;stats.failures++;r.error=error.message;}}
      finally{busy=false;}
     })();break;
    }
   },
   whenIdle(){return pending;},
-  dispose(){if(disposed)return;disposed=true;controller.abort(new DOMException('World disposed','AbortError'));records.clear();}
+  dispose(){if(disposed)return;disposed=true;controller.abort(new DOMException('World disposed','AbortError'));for(const r of records.values())releaseSource(r);records.clear();}
  };
 }

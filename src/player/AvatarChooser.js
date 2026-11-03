@@ -8,6 +8,18 @@ const palettes = {
 	hair: ['#171512','#33251c','#754a2e','#a95732','#d8b779','#adadab'],
 };
 let styled = false;
+// Persist only after all asynchronous rendering work has succeeded. A failed
+// storage write leaves the old durable photo intact and restores its live view.
+export async function commitAvatarDraft({ready,apply,persist,restore}) {
+	const rollback=async()=>{
+		try { await restore(); }
+		catch(cause) { throw new Error('Save failed and the character preview could not be restored. Your saved photo is unchanged. Reopen the avatar chooser to retry.',{cause}); }
+	};
+	try { await ready(); await apply(); }
+	catch(cause) { await rollback(); throw new Error('Could not load this character or face photo. Please try again.',{cause}); }
+	try { persist(); }
+	catch(cause) { await rollback(); throw new Error('Photo could not be saved in browser storage. Your previous saved photo was restored. Free browser storage and try again.',{cause}); }
+}
 // Only the owner's chooser is wired to browser storage. Remote avatar instances
 // never read the owner's photo or carry it in their appearance packet.
 export function attachLocalFacePhotoStore(chooser, read=loadFacePhoto, subscribe=subscribeFacePhoto) {
@@ -74,12 +86,17 @@ export class AvatarChooser {
 			const controls=[...this.dialog.querySelectorAll('button,input,select')].map(control=>[control,control.disabled]);
 			for(const [control] of controls) control.disabled=true;
 			try {
-				await this.faceTask;
-				if(this.faceChanged) {
-					try { if(this.faceDraft) saveFacePhoto(this.faceDraft); else removeFacePhoto(); }
-					catch { this.status('Photo could not be saved in browser storage. Your previous saved photo is unchanged. Free browser storage and try again.'); return; }
-				}
-				if (app) await app.avatar.setAppearance(this.draft);
+				await commitAvatarDraft({
+					ready:async()=>{ await this.faceTask; if(this.faceError) throw this.faceError; },
+					apply:async()=>{ if(app) await app.avatar.setAppearance(this.draft); },
+					persist:()=>{ if(this.faceChanged) { if(this.faceDraft) saveFacePhoto(this.faceDraft); else removeFacePhoto(); } },
+					restore:async()=>{
+						try { if(app) await app.avatar.setAppearance(this.value); }
+						finally { this.faceDraft=this.faceOriginal; this.faceSource=null; this.updateFacePreview(); await this.faceTask; }
+						if(this.faceError) throw this.faceError;
+					},
+				});
+				this.faceOriginal=this.faceDraft; this.faceChanged=false;
 				this.value={...this.draft}; const saved=saveAppearance(this.value);
 				this.name=this.nameInput.value.trim().replace(/[\x00-\x1f<>]/g,'').slice(0,24) || 'Explorer';
 				try { localStorage.setItem('elsemesh.avatar.name',this.name); } catch { /* Session-only name. */ }
@@ -87,7 +104,7 @@ export class AvatarChooser {
 				if(app) app.player.avatarAppearance={...this.value};
 				if (!saved) { this.status('Applied for this session. Browser storage is unavailable.'); return; }
 				this.close(true);
-			} catch { this.status('Could not load this character. Please try again.'); }
+			} catch(error) { this.status(error.message || 'Could not load this character. Please try again.'); }
 			finally { for(const [control,disabled] of controls) control.disabled=disabled; this.saving=false; }
 		};
 		this.dialog.querySelector('.cancel').onclick = () => this.close(false);
@@ -118,6 +135,7 @@ export class AvatarChooser {
 		this.dialog.querySelector('.elsemesh-avatar-status').before(section);
 	}
 	updateFacePreview() {
+		this.faceError=null;
 		const record=this.faceDraft;
 		this.faceSection.querySelector('.face-empty').textContent=record?'Square photo crop preview. The game view shows the actual character when the front camera is available.':'No local face photo.';
 		for(const input of this.faceSection.querySelectorAll('[data-face-control]')) input.disabled=!this.faceSource;
@@ -127,7 +145,7 @@ export class AvatarChooser {
 		this.faceTask=(async()=>{
 			if(!record) {
 				try { await this.app?.avatar.setLocalFacePhoto?.(null); }
-				catch { if(revision===this.faceRevision) this.status('Could not update your character preview.'); }
+				catch(error) { if(revision===this.faceRevision) { this.faceError=error; this.status('Could not update your character preview.'); } }
 				return;
 			}
 			let image;
@@ -140,7 +158,7 @@ export class AvatarChooser {
 					for(const input of this.faceSection.querySelectorAll('[data-face-control]')) input.disabled=false;
 				}
 				await this.app?.avatar.setLocalFacePhoto?.({image,revision:String(revision)});
-			} catch { if(revision===this.faceRevision) this.status('Could not display this face photo. Choose another image.'); }
+			} catch(error) { if(revision===this.faceRevision) { this.faceError=error; this.status('Could not display this face photo. Choose another image.'); } }
 			finally { image?.close?.(); }
 		})();
 	}

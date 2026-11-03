@@ -21,19 +21,27 @@ export function bindWebGLFaceTexture({model},texture){
  model.traverse(object=>{for(const material of Array.isArray(object.material)?object.material:[object.material]){
   if(material?.name!=='head')continue;
   let state=material.userData.localFacePhoto;
+  if(!state&&!texture)continue;
   if(!state){
-   state=material.userData.localFacePhoto={texture:null,previous:material.onBeforeCompile,key:material.customProgramCacheKey()};
+   // Three can reuse a cached program without calling onBeforeCompile again.
+   // Keep uniform identities and program shape stable after the first opt-in;
+   // rebinding must update the objects already captured by the compiled shader.
+   state=material.userData.localFacePhoto={sampler:{value:null},enabled:{value:0},previous:material.onBeforeCompile,key:material.customProgramCacheKey()};
    material.onBeforeCompile=function(shader,renderer){
-    state.previous.call(this,shader,renderer);if(!state.texture)return;
-    shader.uniforms.localFacePhoto={value:state.texture};
-    shader.fragmentShader='uniform sampler2D localFacePhoto;\n'+shader.fragmentShader;
+    state.previous.call(this,shader,renderer);
+    shader.uniforms.localFacePhoto=state.sampler;shader.uniforms.localFaceEnabled=state.enabled;
+    shader.fragmentShader='uniform sampler2D localFacePhoto;uniform float localFaceEnabled;\n'+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
-     vec4 localFace=texture2D(localFacePhoto,vMapUv);
-     if(floor(texture2D(avatarZoneMap,vMapUv).r*5.0+0.5)==3.0)diffuseColor.rgb=mix(diffuseColor.rgb,localFace.rgb,localFace.a);
+     if(localFaceEnabled>0.5){
+      vec4 localFace=texture2D(localFacePhoto,vMapUv);
+      if(floor(texture2D(avatarZoneMap,vMapUv).r*5.0+0.5)==3.0)diffuseColor.rgb=mix(diffuseColor.rgb,localFace.rgb,localFace.a);
+     }
     `);
    };
-   material.customProgramCacheKey=()=>state.key+(state.texture?'|local-face-photo-v1':'');
+   material.customProgramCacheKey=()=>state.key+'|local-face-photo-v2';material.needsUpdate=true;
   }
-  state.texture=texture;material.needsUpdate=true;
+  // Original albedo is owned by the model and remains alive until model disposal.
+  // The disabled branch does not sample it; null uses Three's own empty fallback.
+  state.sampler.value=texture??material.map??null;state.enabled.value=texture?1:0;
  }});
 }

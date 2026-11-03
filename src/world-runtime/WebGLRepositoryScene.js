@@ -1,4 +1,4 @@
-import {createRepositoryTextureTiers} from './RepositoryTextureTiers.js';
+import {createRepositoryTextureTiers,textureTierReferences} from './RepositoryTextureTiers.js';
 import {createSplatSceneAdapter} from './SplatSceneAdapter.js';
 import {buildMediaScreenHousing} from './MediaScreen.js';
 import {installRepositoryPrimitiveLOD} from './RepositoryPrimitiveLOD.js';
@@ -138,12 +138,12 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
    else throw Error('Unsupported WebGL repository object '+object.kind);
   }
   const ambient=createRepositoryAmbientBehaviour(project,{terrain:candidate.terrain});candidate.ambient=ambient;
-  const groups=new Map(),cache=new Map(),screensByObject=new Map((project.terminals??[]).filter(t=>t.screenObjectId).map(t=>[t.screenObjectId,t.kind]));
+  const groups=new Map(),cache=new Map(),sourceBytes=new Map(),screensByObject=new Map((project.terminals??[]).filter(t=>t.screenObjectId).map(t=>[t.screenObjectId,t.kind]));
   for(const object of allObjects.filter(o=>o.kind==='glb'&&effectiveObjectState(allObjects,o.id).visible)){const kind=screensByObject.get(object.id),key=object.assetId+JSON.stringify(object.materialOverrides??[])+(kind??'')+(object.landscapeChunk??'');if(!groups.has(key))groups.set(key,{objects:[],kind});groups.get(key).objects.push(object);}
   for(const {objects,kind}of groups.values()){
    const first=objects[0],asset=project.assets.find(a=>a.id===first.assetId);if(!asset)throw Error('Missing asset '+first.assetId);
-   let loaded=cache.get(asset.id);if(!loaded){const response=await fetch(asset.dataUrl);if(!response.ok)throw Error('Asset read failed');const bytes=new Uint8Array(await response.arrayBuffer());loaded=await inspectAndLoadAsset(bytes.buffer);loaded.textureTierBytes=bytes;cache.set(asset.id,loaded);candidate.loadedAssets.add(loaded);}
-   if(!kind)candidate.textureTiers.register(asset,loaded.textureTierBytes,loaded,objects.map(o=>matrices.get(o.id).elements.slice(12,15)));
+   let loaded=cache.get(asset.id);if(!loaded){const response=await fetch(asset.dataUrl);if(!response.ok)throw Error('Asset read failed');const bytes=new Uint8Array(await response.arrayBuffer());loaded=await inspectAndLoadAsset(bytes.buffer);if(options.loaded?.source?.textureTierRead&&textureTierReferences(asset).length)sourceBytes.set(asset.id,bytes);cache.set(asset.id,loaded);candidate.loadedAssets.add(loaded);}
+   if(!kind)candidate.textureTiers.register(asset,sourceBytes.get(asset.id),loaded,objects.map(o=>matrices.get(o.id).elements.slice(12,15)));
    loaded.scene.updateMatrixWorld(true);const materialCache=new Map(),retro=kind?buildWebGLRetroMaterial(kind):null;let primitives=0;
    loaded.scene.traverse(child=>{
     if(!child.isMesh||!child.visible)return;
