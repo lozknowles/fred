@@ -1,6 +1,6 @@
-# Loz's Warehouse Island
+# Fred · Loz's Warehouse Island
 
-Public authored snapshot for Loz’s warehouse island. The playable game pins an immutable content revision; this repository contains no owner credentials or runtime session state.
+Private authored world for Fred. It shares a permanent world identity with the archived public Warehouse snapshot. The playable game pins an immutable content revision; this repository contains no owner credentials or runtime session state.
 
 World ID: `elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319`  
 Region ID: `elsemesh.region:3c498d61-7d1f-478a-8a85-d9e66d3b63fb`  
@@ -9,11 +9,11 @@ Project schema: `elsemesh.worlds.project/2`
 
 Required installed capabilities: `media-screen/1`, `native-island/1`, `object-access/1`, `objects`, `portal/1`, `project/2`, `retro-terminal/1`, `terrain`, `water-exclusion/1`, `water/1`, `weather`, `welcome/1`.
 
-Public content snapshot of the SAME authored Loz world, not a new world identity. It contains authored action ceilings and portal target IDs, not owner keys, runtime contacts, private per-player grants or portal admissions. Importing this snapshot grants no runtime access. Native visuals/media remain dependent on the installed supported engine and provider interaction. Full original legacy game additions are excluded.
+Authored content snapshot of the SAME authored Loz world, not a new world identity. It contains authored action ceilings and portal target IDs, not owner keys, runtime contacts, private per-player grants or portal admissions. Importing this snapshot grants no runtime access. Native visuals/media remain dependent on the installed supported engine and provider interaction. Full original legacy game additions are excluded.
 
 ## Identity and runtime permissions
 
-This public snapshot deliberately shares the permanent identity of the privately operated Loz world. It is a content snapshot, not a separate live authority. Authored action ceilings describe supported actions; they are not private per-player access grants. Owner keys, ledger/session state, endpoints, contacts, signed invitations and runtime admissions are not included. A recipient must configure their own reviewed runtime permissions; importing data confers no access to an existing owner service.
+This snapshot deliberately shares the permanent identity of the privately operated Loz world. It is a content snapshot, not a separate live authority. Authored action ceilings describe supported actions; they are not private per-player access grants. Owner keys, ledger/session state, endpoints, contacts, signed invitations and runtime admissions are not included. A recipient must configure their own reviewed runtime permissions; importing data confers no access to an existing owner service.
 
 ## Content and storage
 
