@@ -1,8 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
+import {PublicPortalRuntime} from '../src/world-runtime/PublicPortalRuntime.js';
 import {WebGLPortalViews,portalTargetSize,portalDestinationPlane,webGLPortalInView,portalApertureIntersectsFrustum,portalApertureVisibleThrough} from '../src/world-runtime/WebGLPortalViews.js';
 const pose=(position=[0,0,0],yaw=0)=>({position,yaw,width:2,height:3});
+test('published runtime stage and live view use the cropped production WebGL material',async()=>{
+ const {views,renderer,mainCamera}=setup(),worldA='elsemesh.world:A',worldB='elsemesh.world:B',id='elsemesh-portal:ab',exitId='elsemesh-portal:ba',digestA='a'.repeat(64),digestB='b'.repeat(64);
+ const catalog={schema:'elsemesh.published-world-catalog/1',renderer:'webgl2',openingWorldId:worldA,worlds:[{worldId:worldA,contentDigest:digestA,bundlePath:`worlds/${digestA}/`},{worldId:worldB,contentDigest:digestB,bundlePath:`worlds/${digestB}/`}],routes:[{sourceWorldId:worldA,portalId:id,destinationWorldId:worldB,destinationPortalId:exitId},{sourceWorldId:worldB,portalId:exitId,destinationWorldId:worldA,destinationPortalId:id}]};
+ const runtime=new PublicPortalRuntime({catalog,views,engine:{prepareRepositoryResources:async()=>{}},host:{},input:{},buildScene:()=>{},disposeCandidate:()=>{},baseURL:'https://example.test/game/'});
+ const source={...pose(),id,enabled:true},active={root:new T.Group(),identity:{worldId:worldA},project:{portals:[source]}};await runtime.finishCandidate(active);
+ const entry=active.publicViewEntries.get(id),material=entry.material;assert.equal(active.root.children[0],entry.aperture);assert.equal(entry.aperture.material,material);assert.equal(material.visible,false,'public staging placeholder skips color/depth');
+ views.restore(active,active.publicViewEntries);views.setDestination(id,{source,destination:pose([10,0,0]),candidate:{root:new T.Group()},ownsCandidate:false,authorizedView:true,state:'live'});
+ renderer.getDrawingBufferSize=v=>v.set(1600,900);renderer.getCurrentViewport=v=>v.set(40,20,1500,800);runtime.render({width:1,height:1});
+ assert.equal(entry.aperture.material,material);assert.equal(material.visible,true);assert.deepEqual(material.uniforms.framebufferSize.value.toArray(),[1500,800]);assert.deepEqual(material.uniforms.framebufferOrigin.value.toArray(),[40,20]);assert.deepEqual(material.uniforms.viewRect.value.toArray(),entry.crop.toArray());assert.ok(entry.crop.z<1);assert.match(material.fragmentShader,/framebufferOrigin.*viewRect.xy/);
+ const entrypoint=readFileSync(new URL('../src/world-runtime/main.js',import.meta.url),'utf8');assert.match(entrypoint,/views:new WebGLPortalViews\(/);assert.match(entrypoint,/const portalOptions=.*\.\.\.backendPortals/);assert.match(entrypoint,/new PublicPortalRuntime\(\{\.\.\.portalOptions/);
+ views.dispose();runtime.cache.dispose();active.disposePublicViews();assert.equal(mainCamera.projectionMatrix.elements.every(Number.isFinite),true);
+});
 test('a nearby return aperture entirely behind the camera does not draw its destination',()=>{
  const {views,renderer,mainCamera}=setup();let draws=0;renderer.render=()=>draws++;
  const source=pose();views.setDestination('return',{candidate:{root:new T.Group()},authorizedView:true,source,destination:pose([10,0,0]),state:'live'});
