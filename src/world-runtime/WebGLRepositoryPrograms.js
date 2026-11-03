@@ -28,7 +28,23 @@ export function compileWebGLRepositoryPass({renderer,camera,root,targetScene,tar
  const onRetire=()=>{changed=true;if(rejectWait&&!settled){settled=true;cleanup();rejectWait(retired());}};
  for(const event of events)canvas?.addEventListener?.(event,onRetire);signal?.addEventListener('abort',onRetire,{once:true});
  const initializationTarget=initializeClipping?new T.WebGLRenderTarget(1,1):null,empty=new T.Scene();let programs;
- const submit=()=>{renderer.compile(root,camera,targetScene);programs=[...(renderer.info?.programs??[])].map(wrapper=>({wrapper,handle:wrapper.program}));};
+ const submit=()=>{
+  const materials=renderer.compile(root,camera,targetScene),wrappers=new Set();
+  if(!(materials instanceof Set)||typeof renderer.properties?.get!=='function')throw Error('Unsupported Three material program contract');
+  for(const material of materials){
+   if(!material?.isMaterial)throw Error('Unsupported Three material program contract');
+   const variants=renderer.properties.get(material)?.programs;
+   if(!(variants instanceof Map)||variants.size===0)throw Error('Unsupported Three material program contract');
+   // A participating material can have two transparent faces or variants from
+   // multiple meshes. Include every cached variant, but never another world's
+   // unrelated entries in renderer.info.programs.
+   for(const wrapper of variants.values()){
+    if(!wrapper||typeof wrapper.isReady!=='function')throw Error('Unsupported Three program readiness contract');
+    wrappers.add(wrapper);
+   }
+  }
+  programs=[...wrappers].map(wrapper=>({wrapper,handle:wrapper.program}));
+ };
  try{
   assertLive();if(initializeClipping)withWebGLPortalRenderState(renderer,()=>{
    renderer.clippingPlanes=clippingPlanes;renderer.localClippingEnabled=clippingPlanes.length>0;
