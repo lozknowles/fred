@@ -1,4 +1,5 @@
 import {T} from './vendor/world-engine-contract.js';
+import {hasPrimedWebGLWeatherShelter} from './WebGLWeatherShelter.js';
 
 // Qualification covers only these authored Warehouse bytes. A different world
 // or content digest requires fresh visual and performance qualification.
@@ -46,6 +47,7 @@ function supportedCompileChain(mesh,m){
  // The audited shelter installer records the material and captures its PRIOR
  // key. Exact default-key suffix excludes chains built over custom plant/depth hooks.
  let scene=mesh;while(scene.parent)scene=scene.parent;
+ if(scene.isScene&&hasPrimedWebGLWeatherShelter(m,scene.userData.weatherShelter))return true;
  if(!scene.isScene||!scene.userData.weatherShelter?.installed?.has(m)||
   typeof m.onBeforeCompile!=='function'||typeof m.customProgramCacheKey!=='function')return false;
  const hook=m.onBeforeCompile.toString();

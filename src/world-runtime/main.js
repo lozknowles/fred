@@ -10,6 +10,7 @@ import {graphicsSceneEligible} from './GraphicsRuntimeState.js';
 import {OpeningProgress} from './OpeningProgress.js';
 import {renderWebGLOpaqueDepthPrepass,createQualifiedWarehouseDepthOccluderProvider} from './WebGLOpaqueDepthPrepass.js';
 import { repositoryWeatherShelters, setMistShelters } from './WeatherShelter.js';
+import {primeWebGLWeatherShelter} from './WebGLWeatherShelter.js';
 import {MediaScreen,collectMediaScreenOccluders,mediaScreenCellVisibility} from './MediaScreen.js';
 import {RepositoryPortalSky} from './RepositoryPortalSky.js';
 import {readOpeningWorld,loadOpeningWorld,validateOpeningWorld} from './OpeningWorld.js';
@@ -95,7 +96,7 @@ async function init(){
   engine.repositoryReadinessSignature=webGLRepositoryReadinessSignature;engine.prepareRepositoryResources=root=>prepareWebGLRepositoryResources({renderer:engine.renderer,camera:engine.camera,root,targetScene:engine.scene});
   const buildGL=async(descriptor,camera,{loaded}={})=>{const candidate=await buildWebGLRepositoryScene(descriptor,camera,repositorySceneOptions(descriptor.project,loaded,{renderer:engine.renderer,backend:'webgl2',camera:engine.camera}));try{installNeonShiftWorld(candidate,loaded);if(candidate.splatScene){candidate.terrain=withSplatMovementBoundary(candidate.splatScene.physics,{requireOwnerConfirmation:()=>movementPortals?.config?.protocol==='elsemesh.owner-runtime/1',getConfirmedPose:()=>confirmedSplatPose(movementPortals,candidate,{contentDigest:loaded?.identity?.contentDigest})});const warm=camera.clone();warm.position.fromArray(descriptor.project.spawn.position);warm.position.y+=1.62;warm.rotation.set(candidate.splatScene.physics.qualification.spawn.pitch??0,descriptor.project.spawn.yaw,0,'YXZ');warm.updateMatrixWorld(true);await candidate.splatScene.prepareResources(warm);}await publicDuck?.install(candidate);return candidate;}catch(error){disposeWebGLRepositoryScene(candidate);throw error;}};
   const ordinaryBuildGL=buildGL;
-  const buildQualifiedGL=async(...args)=>{const candidate=await ordinaryBuildGL(...args);if(installation.kind==='published'&&!candidate.splatScene&&(candidate.shiftingWorld||repositoryWeatherShelters(candidate.project??candidate.descriptor?.project).length===1))candidate.root.userData.repositoryActualPassPreparation=true;return candidate;};
+  const buildQualifiedGL=async(...args)=>{const candidate=await ordinaryBuildGL(...args);if(installation.kind==='published'&&!candidate.splatScene&&(candidate.shiftingWorld||repositoryWeatherShelters(candidate.project??candidate.descriptor?.project).length===1)){candidate.root.userData.repositoryActualPassPreparation=true;primeWebGLWeatherShelter(engine,candidate.root);}return candidate;};
   const disposeGL=candidate=>{publicDuck?.releaseCandidate(candidate);disposeWebGLRepositoryScene(candidate);};
   backendHost={buildCandidate:buildQualifiedGL,disposeCandidate:disposeGL,buildNeon:buildWebGLNeon};
   backendPortals={buildScene:buildQualifiedGL,disposeCandidate:disposeGL,createPeerLayer:(scene,id)=>createWebGLRepositoryPeerLayer(scene,id,engine.prepareRepositoryResources),addPortalFrame:addWebGLPortalFrame,views:new WebGLPortalViews({engine,maxViews:installation.kind==='published'?3:2,mainCamera:engine.camera,configureScene:configureWebGLRepositoryScene})};

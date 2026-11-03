@@ -34,18 +34,66 @@ float weatherExteriorDistance(vec3 start,vec3 end){
  for(int i=0;i<4;i++){covered+=max(0.0,highs[i]-max(lows[i],last));last=max(last,highs[i]);}
  return distance(start,end)*(1.0-covered);
 }`;
-export function updateWebGLWeatherShelter(engine,active,time,underwater){
+const primedMaterials=new WeakMap();
+function weatherState(engine){
  let state=engine.scene.userData.weatherShelter;
  if(!state){
   const uniforms={weatherShelterCount:{value:0},weatherShelterInverse:{value:Array.from({length:MAX_WEATHER_SHELTERS},()=>new T.Matrix4())},weatherShelterMin:{value:Array.from({length:MAX_WEATHER_SHELTERS},()=>new T.Vector3())},weatherShelterMax:{value:Array.from({length:MAX_WEATHER_SHELTERS},()=>new T.Vector3())}};
+  state={uniforms,rain:null,installed:new WeakSet()};engine.scene.userData.weatherShelter=state;
+ }
+ return state;
+}
+/** Preserve stock fog until this exact material is first visited. Thereafter it
+ * uses the same engine weather uniforms and exterior-distance formula as the
+ * legacy installer. The uniform switch never changes program keys or versions.
+ * Weak ownership adds no material lifetime or disposal responsibility.
+ */
+export function primeWebGLWeatherShelter(engine,root){
+ const state=weatherState(engine);
+ root.traverse(node=>{for(const material of [].concat(node.material??[])){
+  if(material.fog===false||state.installed.has(material))continue;
+  const existing=primedMaterials.get(material);if(existing){if(existing.state!==state)throw Error('Weather material belongs to another engine');continue;}
+  const prior=material.onBeforeCompile,priorKey=material.customProgramCacheKey,key=priorKey.call(material),activated={value:false};
+  const hook=function(shader,renderer){prior.call(this,shader,renderer);Object.assign(shader.uniforms,state.uniforms,{weatherShelterActivated:activated});
+   shader.vertexShader='varying vec3 vWeatherWorld;\n'+shader.vertexShader;
+   shader.vertexShader=shader.vertexShader.replace('#include <fog_vertex>','#include <fog_vertex>\nvWeatherWorld=cameraPosition+transpose(mat3(viewMatrix))*mvPosition.xyz;');
+   shader.fragmentShader='uniform bool weatherShelterActivated;\n'+fogFunctions+'\n'+shader.fragmentShader;
+   shader.fragmentShader=shader.fragmentShader.replace('#include <fog_fragment>',`if(!weatherShelterActivated){
+    #include <fog_fragment>
+   }else{
+    #ifdef USE_FOG
+     float exterior=weatherExteriorDistance(cameraPosition,vWeatherWorld);
+     #ifdef FOG_EXP2
+      float fogFactor=1.0-exp(-fogDensity*fogDensity*exterior*exterior);
+     #else
+      float fogFactor=smoothstep(fogNear,fogFar,exterior);
+     #endif
+     gl_FragColor.rgb=mix(gl_FragColor.rgb,fogColor,fogFactor);
+    #endif
+   }`);
+  },cacheKey=()=>key+'|weather-shelter-activation-v1';
+  primedMaterials.set(material,{state,prior,priorKey,hook,cacheKey,activated});
+  material.onBeforeCompile=hook;material.customProgramCacheKey=cacheKey;material.needsUpdate=true;
+ }});
+}
+/** Exact installer identity, including its prior chain, for the depth proof. */
+export function hasPrimedWebGLWeatherShelter(material,state){
+ const record=primedMaterials.get(material);
+ return !!record&&record.state===state&&record.prior===T.Material.prototype.onBeforeCompile&&record.priorKey===T.Material.prototype.customProgramCacheKey&&material.onBeforeCompile===record.hook&&material.customProgramCacheKey===record.cacheKey;
+}
+export function updateWebGLWeatherShelter(engine,active,time,underwater){
+ weatherState(engine);
+ let state=engine.scene.userData.weatherShelter;
+ if(!state.rain){
   const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.BufferAttribute(new Float32Array(RAIN_PARTICLES*12),3));geometry.setIndex(quadIndices(RAIN_PARTICLES));
   const rain=new T.Mesh(geometry,new T.MeshBasicMaterial({color:'#c4e3ef',transparent:true,opacity:.55,depthWrite:false,side:T.DoubleSide,fog:true}));rain.frustumCulled=false;rain.name='repository exterior rain';engine.scene.add(rain);
-  state={uniforms,rain,installed:new WeakSet()};engine.scene.userData.weatherShelter=state;
+  state.rain=rain;
  }
  const shelters=repositoryWeatherShelters(active?.project),visible=underwater?[]:shelters;
  state.uniforms.weatherShelterCount.value=visible.length;
  visible.forEach((v,i)=>{state.uniforms.weatherShelterInverse.value[i].fromArray(v.inverse);state.uniforms.weatherShelterMin.value[i].fromArray(v.min);state.uniforms.weatherShelterMax.value[i].fromArray(v.max);});
  engine.scene.traverse(node=>{for(const material of [].concat(node.material??[])){
+  const primed=primedMaterials.get(material);if(primed?.state===state){primed.activated.value=true;state.installed.add(material);continue;}
   if(state.installed.has(material)||material.fog===false)continue;state.installed.add(material);
   const prior=material.onBeforeCompile,priorKey=material.customProgramCacheKey.bind(material);
   const key=priorKey();material.customProgramCacheKey=()=>key+'|weather-shelter-v1';
