@@ -70,24 +70,55 @@ function buildPlants(source,time,detail,materials,mainCamera){
   const variants=canopy?(species==='trees'?3:2):species==='bananas'?2:1;
   for(let variant=0;variant<variants;variant++){
    const records=source.records[species].filter(r=>canopy?Math.floor(fract(r.seed*7.77)*variants)===variant:species==='bananas'?(r.seed<.5?0:1)===variant:true);if(!records.length)continue;
+   const occlusionCache={poses:null,bounds:null};
    const original=species==='bananas'?factory(variant?23:9):factory();const native=canopy?Plants.lobeVariantGeometry(original.geometry,Plants.LOBE_TABLE,(variant+(species==='shrubs'?Plants.TREE_VARIANTS:0))*8):original.geometry;
    for(const distant of near?[false,true]:[false]){
     const farPalm=species==='palms'&&distant?Plants.buildPalmFar().geometry:null;const geometry=convertNativePlantGeometry(farPalm??native,{leafStride:distant?(canopy?8:1):1}),count=records.length;if(farPalm)farPalm.dispose();geometry.setAttribute('iPlant',new T.InstancedBufferAttribute(new Float32Array(count*4),4));geometry.setAttribute('iRecord',new T.InstancedBufferAttribute(new Float32Array(count*4),4));
-    const mesh=new T.InstancedMesh(geometry,materials[canopy?'tree':'palm'],count);mesh.count=0;mesh.frustumCulled=false;mesh.userData.mediaOcclusionPlant=canopy?'native-canopy-v1':'native-palm-v1';mesh.userData.nativePlantSpecies=species;mesh.userData.nativePlantDistant=distant;root.add(mesh);batches.push({mesh,records,species,canopy,distant,near,far});
+
+    const mesh=new T.InstancedMesh(geometry,materials[canopy?'tree':'palm'],count);mesh.count=0;mesh.frustumCulled=false;mesh.userData.mediaOcclusionPlant=canopy?'native-canopy-v1':'native-palm-v1';mesh.userData.nativePlantSpecies=species;mesh.userData.nativePlantDistant=distant;root.add(mesh);batches.push({mesh,records,occlusionCache,species,canopy,distant,near,far});
    }
    if(native!==original.geometry)native.dispose();original.geometry.dispose();
   }
  }
- let lastProof=null,lastCanopyProof=false;const lastVP=new T.Matrix4(),lastRoot=new T.Matrix4();
+ let lastProof=null,lastCanopyProof=false,lastHadProof=false;const lastVP=new T.Matrix4(),lastRoot=new T.Matrix4(),identity=new T.Matrix4();
  const direction=new T.Vector3(),frustum=new T.Frustum(),vp=new T.Matrix4(),sphere=new T.Sphere();
- return{root,setOccluders(value){occlusion.setOccluders(value);lastCamera=null;},setOcclusionEnabled(value){occlusion.setEnabled(value);lastCamera=null;},updateView(camera){camera.getWorldDirection(direction);if(!occlusion.active&&camera===lastCamera&&lastPos.distanceToSquared(camera.position)<16&&lastDirection.dot(direction)>.998)return;camera.updateMatrixWorld();vp.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);occlusion.prepare(camera,root);root.updateWorldMatrix(true,false);const canopyProof=materials.tree.userData.nativeWindStrength===1&&Math.abs(materials.tree.userData.nativeWindVector.length()-1)<1e-6;if(occlusion.active&&lastCanopyProof===canopyProof&&lastCamera===camera&&lastVP.equals(vp)&&lastRoot.equals(root.matrixWorld)&&lastProof===occlusion.signature)return;lastCamera=camera;lastPos.copy(camera.position);lastDirection.copy(direction);lastVP.copy(vp);lastRoot.copy(root.matrixWorld);lastProof=occlusion.signature;lastCanopyProof=canopyProof;frustum.setFromProjectionMatrix(vp);occlusion.resetCounters();displayed=0;
-  for(const batch of batches){const {mesh}=batch,plant=mesh.geometry.getAttribute('iPlant'),recordAttr=mesh.geometry.getAttribute('iRecord');let count=0;
-   for(const r of batch.records){const distance=Math.hypot(r.x-camera.position.x,r.z-camera.position.z);if(distance>batch.far||batch.near&&(batch.distant?distance<batch.near:distance>=batch.near))continue;sphere.center.set(r.x,r.y+(r.H??5)*.5,r.z);sphere.radius=Math.max(4,r.H??0)*r.s+4;if(!frustum.intersectsSphere(sphere))continue;
-    nativePlantPoseMatrix(r,matrix,batch.canopy);if(batch.canopy&&occlusion.active&&canopyProof){nativeCanopyOcclusionSphere(mesh.geometry,r,matrix,occlusionSphere).applyMatrix4(root.matrixWorld);if(occlusion.rejects(occlusionSphere))continue;}mesh.setMatrixAt(count,matrix);plant.setXYZW(count,(r.la??0)-r.yaw,r.l??0,(batch.species==='bananas'?.02:r.H??1)/Math.max(.001,r.s),r.seed);recordAttr.setXYZW(count,r.yaw,r.s,batch.canopy?1:0,0);count++;
+ return{root,setOccluders(value){occlusion.setOccluders(value);lastCamera=null;},setOcclusionEnabled(value){occlusion.setEnabled(value);lastCamera=null;},updateView(camera){
+  camera.getWorldDirection(direction);camera.updateMatrixWorld();vp.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+  occlusion.prepare(camera,root);root.updateWorldMatrix(true,false);
+  const canopyProof=materials.tree.userData.nativeWindStrength===1&&Math.abs(materials.tree.userData.nativeWindVector.length()-1)<1e-6,proofActive=occlusion.active&&canopyProof;
+  if(lastCamera===camera&&lastCanopyProof===canopyProof&&lastRoot.equals(root.matrixWorld)){
+   if(proofActive&&lastHadProof&&lastVP.equals(vp)&&lastProof===occlusion.signature)return;
+   // Ineligible/alternate views retain the original movement threshold. Only
+   // restoring an earlier rejected set forces a repack when proof disappears.
+   if(!proofActive&&!lastHadProof&&lastPos.distanceToSquared(camera.position)<16&&lastDirection.dot(direction)>.998)return;
+  }
+  lastCamera=camera;lastPos.copy(camera.position);lastDirection.copy(direction);lastVP.copy(vp);lastRoot.copy(root.matrixWorld);lastProof=occlusion.signature;lastCanopyProof=canopyProof;lastHadProof=proofActive;
+  frustum.setFromProjectionMatrix(vp);occlusion.resetCounters();displayed=0;
+  const identityRoot=root.matrixWorld.equals(identity);
+  for(const batch of batches){
+   const {mesh,occlusionCache}=batch,plant=mesh.geometry.getAttribute('iPlant'),recordAttr=mesh.geometry.getAttribute('iRecord');let count=0;
+   if(batch.canopy&&proofActive&&!occlusionCache.poses){
+    const n=batch.records.length;occlusionCache.poses=new Float32Array(n*16);occlusionCache.bounds=new Float64Array(n*4);
+    for(let i=0;i<n;i++){nativePlantPoseMatrix(batch.records[i],matrix,true);matrix.toArray(occlusionCache.poses,i*16);nativeCanopyOcclusionSphere(mesh.geometry,batch.records[i],matrix,occlusionSphere);occlusionCache.bounds.set([occlusionSphere.center.x,occlusionSphere.center.y,occlusionSphere.center.z,occlusionSphere.radius],i*4);}
+   }
+   const poses=occlusionCache.poses,canopyBounds=occlusionCache.bounds;
+   for(let i=0;i<batch.records.length;i++){
+    const r=batch.records[i],distance=Math.hypot(r.x-camera.position.x,r.z-camera.position.z);
+    if(distance>batch.far||batch.near&&(batch.distant?distance<batch.near:distance>=batch.near))continue;
+    sphere.center.set(r.x,r.y+(r.H??5)*.5,r.z);sphere.radius=Math.max(4,r.H??0)*r.s+4;if(!frustum.intersectsSphere(sphere))continue;
+    if(batch.canopy&&proofActive){
+     const j=i*4;
+     if(identityRoot){if(occlusion.rejectsXYZ(canopyBounds[j],canopyBounds[j+1],canopyBounds[j+2],canopyBounds[j+3]))continue;}
+     else{occlusionSphere.center.fromArray(canopyBounds,j);occlusionSphere.radius=canopyBounds[j+3];occlusionSphere.applyMatrix4(root.matrixWorld);if(occlusion.rejects(occlusionSphere))continue;}
+    }
+    // Only canopy instances in a world with admitted proof retain cached poses.
+    // Near/far share the Float32 upload pose; proof bounds use original doubles.
+    if(poses)matrix.fromArray(poses,i*16);else nativePlantPoseMatrix(r,matrix,batch.canopy);mesh.setMatrixAt(count,matrix);plant.setXYZW(count,(r.la??0)-r.yaw,r.l??0,(batch.species==='bananas'?.02:r.H??1)/Math.max(.001,r.s),r.seed);recordAttr.setXYZW(count,r.yaw,r.s,batch.canopy?1:0,0);count++;
    }
    mesh.count=count;mesh.instanceMatrix.needsUpdate=true;plant.needsUpdate=recordAttr.needsUpdate=true;displayed+=count;
   }
- },stats:()=>({records:Object.values(source.records).filter(Array.isArray).reduce((n,a)=>n+a.length,0),displayed,batches:batches.length,occlusion:occlusion.stats(),farPolicy:'every eighth distant leaf card; unqualified atlas equivalence'}),dispose(){for(const batch of batches)batch.mesh.geometry.dispose();root.removeFromParent();}};
+
+ },stats:()=>({records:Object.values(source.records).filter(Array.isArray).reduce((n,a)=>n+a.length,0),displayed,batches:batches.length,occlusion:{...occlusion.stats(),retainedBytes:[...new Set(batches.map(b=>b.occlusionCache))].reduce((n,c)=>n+(c.poses?.byteLength??0)+(c.bounds?.byteLength??0),0)},farPolicy:'every eighth distant leaf card; unqualified atlas equivalence'}),dispose(){for(const batch of batches)batch.mesh.geometry.dispose();root.removeFromParent();}};
 }
 function terrainMaterial({normal,splat,rect,domain,detail,shore,grass,ready,coarse,time}){
  const material=new T.MeshStandardMaterial({color:'#ffffff',roughness:.9,side:T.DoubleSide});
@@ -268,7 +299,7 @@ export async function buildWebGLNativeIsland({project,root,camera,options={}}){
   const updateTileGeometry=tile=>{const mesh=tileMeshes.get(tile.id);if(!mesh)return;mesh.geometry.dispose();mesh.geometry=webGLNativeTerrainTile(data,tile);};
   cache=new NativeIslandTiles({tiles:source.tiles,readTile:source.readTile,maxBytes:options.maxBytes,maxConcurrency:options.maxConcurrency,onLoad(tile,decoded){const fields=decoded.fields??decoded;data.apply(tile,decoded);const normal=texture(fields.normal,tile.width),splat=texture(fields.splat,tile.width),mesh=new T.Mesh(webGLNativeTerrainTile(data,tile),materialFor(normal,splat,[data.origin+tile.x,data.origin+tile.z,tile.width,tile.height],false));mesh.userData.nativeTextures=[normal,splat];tileMeshes.set(tile.id,mesh);group.add(mesh);readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=255;ready.needsUpdate=true;for(const other of source.tiles)if(Math.abs(other.x-tile.x)<=128&&Math.abs(other.z-tile.z)<=128)updateTileGeometry(other);},onEvict(tile){const mesh=tileMeshes.get(tile.id);if(mesh){mesh.removeFromParent();mesh.geometry.dispose();mesh.material.dispose();mesh.userData.nativeTextures.forEach(t=>t.dispose());tileMeshes.delete(tile.id);}readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=0;ready.needsUpdate=true;}});data.cache=cache;
   const angle=source.ocean.fft.local.windDirection*Math.PI/180,wind={value:new T.Vector2(Math.sin(angle),Math.cos(angle))},gust={value:new T.Vector2()};
-  const materials={palm:plantMaterial('palm',time,wind,gust,detail,bark.palm),tree:plantMaterial('tree',time,wind,gust,detail,bark.tree)};plants=buildPlants(source,time,detail,materials,camera);group.add(plants.root);water=buildWebGLNativeSea(source,data,time,shore,coarseHeight);group.add(water.mesh);sky=buildWebGLNativeSky(project.environment);group.add(sky.mesh);
+  const materials={palm:plantMaterial('palm',time,wind,gust,detail,bark.palm),tree:plantMaterial('tree',time,wind,gust,detail,bark.tree)};plants=buildPlants(source,time,detail,materials,options.mainCamera??camera);group.add(plants.root);water=buildWebGLNativeSea(source,data,time,shore,coarseHeight);group.add(water.mesh);sky=buildWebGLNativeSky(project.environment);group.add(sky.mesh);
   const frustum=new T.Frustum(),vp=new T.Matrix4(),box=new T.Box3(),bindView=viewCamera=>{sky.update(time.value,viewCamera);viewCamera.updateMatrixWorld();vp.multiplyMatrices(viewCamera.projectionMatrix,viewCamera.matrixWorldInverse);frustum.setFromProjectionMatrix(vp);const {x,z}=viewCamera.position;cache.requestView(x,z,2400,tile=>{box.min.set(tile.bounds[0],tile.minHeight??-90,tile.bounds[1]);box.max.set(tile.bounds[2],tile.maxHeight??200,tile.bounds[3]);return frustum.intersectsBox(box)||Math.hypot((tile.bounds[0]+tile.bounds[2])/2-x,(tile.bounds[1]+tile.bounds[3])/2-z)<180;});plants.updateView(viewCamera);};
   return{data,water,sky,query:water.query,setPlantOccluders:plants.setOccluders,setPlantOcclusionEnabled:plants.setOcclusionEnabled,setEnvironment(value){sky.setEnvironment(value);},async ensureArrival(position){const release=await cache.ensureAt(position[0],position[2],3);arrivalLeases.add(release);return()=>{arrivalLeases.delete(release);release();};},canOccupy(x,z,radius=1){return [[x-radius,z-radius],[x+radius,z-radius],[x-radius,z+radius],[x+radius,z+radius]].every(([px,pz])=>cache.readyAt(px,pz));},bindView,update(dt,viewCamera){time.value+=dt;gust.value.addScaledVector(wind.value,(.7*(project.environment.windSpeed??7)+1.5)*dt);bindView(viewCamera);},stats:()=>({...WEBGL_NATIVE_ISLAND_QUALIFICATION,...cache.stats(),plants:plants.stats(),source:source.sourceStats?.(),terrainPolicy:'exact fine cell heights and captured normal/splat; approximate GLSL surface shading',grassPolicy:'captured density field; blades not implemented'}),dispose(){materials.palm.dispose();materials.tree.dispose();dispose();}};
  }catch(error){dispose();throw error;}

@@ -26,49 +26,89 @@ export function sphereBehindTriangle(sphere,cone,margin=0.15){
 /** Only the main perspective view can discard instances. Alternate/portal views
  * restore every instance and use their own ordinary frustum selection. */
 export function createNativePlantOcclusion(mainCamera){
- let meshes=[],enabled=true,cones=[],tested=0,rejected=0,revision=0,signature=null;
- const eye=new T.Vector3(),a=new T.Vector3(),b=new T.Vector3(),c=new T.Vector3(),instance=new T.Matrix4(),world=new T.Matrix4(),view=new T.Vector3();
+ const side=16,bins=Array.from({length:side*side},()=>[]),vp=new T.Matrix4(),projected=new T.Vector3();
+ let meshes=[],enabled=true,cones=[],triangles=[],tested=0,rejected=0,planeTests=0,revision=0,signature=null,geometrySignature=null,eligibleMeshes=0,reason='no-occluders';
+ const eye=new T.Vector3(),instance=new T.Matrix4(),world=new T.Matrix4(),view=new T.Vector3();
+ const clear=why=>{cones=[];signature=null;reason=why;for(const bin of bins)bin.length=0;};
+ function rejectsXYZ(x,y,z,radius){
+  if(!cones.length)return false;
+  tested++;
+  // A sphere contained by a triangle's cone necessarily has its CENTER inside
+  // the projected triangle. A screen grid therefore only narrows candidates;
+  // full four-plane sphere containment remains the sole rejection proof.
+  const e=vp.elements,w=e[3]*x+e[7]*y+e[11]*z+e[15];
+  if(w<=0)return false;
+  const u=(e[0]*x+e[4]*y+e[8]*z+e[12])/w,v=(e[1]*x+e[5]*y+e[9]*z+e[13])/w;
+  if(u<-1||u>1||v<-1||v>1)return false;
+  const list=bins[Math.min(side-1,Math.floor((v+1)*.5*side))*side+Math.min(side-1,Math.floor((u+1)*.5*side))],r=radius+.15;
+  if(!Number.isFinite(r)||r<=0)return false;
+  for(const cone of list){
+   const p=cone.planes;planeTests++;
+   if(p[0]*x+p[1]*y+p[2]*z+p[3]>=-r)continue;
+   let covered=true;
+   for(let i=4;i<16;i+=4){planeTests++;if(p[i]*x+p[i+1]*y+p[i+2]*z+p[i+3]<=r){covered=false;break;}}
+   if(covered){rejected++;return true;}
+  }
+  return false;
+ }
  return {
   setOccluders(value){meshes=value??[];revision++;},
-  setEnabled(value){enabled=!!value;revision++;},
-  get active(){return enabled&&meshes.length>0;},get revision(){return revision;},get signature(){return signature;},resetCounters(){tested=rejected=0;},
+  setEnabled(value){if(enabled!==!!value){enabled=!!value;signature=null;}},
+  get configured(){return enabled&&meshes.length>0;},get active(){return enabled&&cones.length>0;},get signature(){return signature;},
+  resetCounters(){tested=rejected=planeTests=0;},
   prepare(camera,plantRoot=null){
-   if(!enabled||camera!==mainCamera||!camera.isPerspectiveCamera||camera.isArrayCamera){cones=[];signature=null;return;}
-   // Oblique projection is a portal/reflection view, even if it reuses the camera.
-   if(Math.abs(camera.projectionMatrix.elements[2])+Math.abs(camera.projectionMatrix.elements[6])>1e-8){cones=[];signature=null;return;}
-   const eligible=[],state=[revision,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,camera.near,camera.layers.mask];
-   let renderRoot=plantRoot;while(renderRoot?.parent)renderRoot=renderRoot.parent;
+   if(!enabled||!meshes.length){clear(!enabled?'disabled':'no-occluders');return;}
+   if(camera!==mainCamera||!camera.isPerspectiveCamera||camera.isArrayCamera){clear('alternate-view');return;}
+   if(Math.abs(camera.projectionMatrix.elements[2])+Math.abs(camera.projectionMatrix.elements[6])>1e-8){clear('oblique-projection');return;}
+   const eligible=[],state=[revision];let renderRoot=plantRoot;while(renderRoot?.parent)renderRoot=renderRoot.parent;
    for(const mesh of meshes){
     if(!isEligibleWebGLDepthOccluder(mesh)||mesh.material.wireframe||!mesh.layers.test(camera.layers))continue;
     let visible=true,meshRoot=mesh;for(let p=mesh;p;p=p.parent){if(!p.visible)visible=false;meshRoot=p;}
     if(!visible||!mesh.parent||renderRoot&&meshRoot!==renderRoot)continue;
     mesh.updateWorldMatrix(true,false);eligible.push(mesh);
-    state.push(mesh.uuid,mesh.geometry.uuid,mesh.geometry.getAttribute('position').id,mesh.geometry.getAttribute('position').version,mesh.geometry.index?.id,mesh.geometry.index?.version,mesh.instanceMatrix?.id,mesh.instanceMatrix?.version,mesh.count,mesh.material.side,mesh.geometry.drawRange.start,mesh.geometry.drawRange.count,...mesh.matrixWorld.elements);
+    const geometry=mesh.geometry,pos=geometry.getAttribute('position');
+    state.push(mesh.uuid,geometry.uuid,pos.id,pos.version,geometry.index?.id,geometry.index?.version,mesh.instanceMatrix?.id,mesh.instanceMatrix?.version,mesh.count,mesh.material.side,geometry.drawRange.start,geometry.drawRange.count,...mesh.matrixWorld.elements);
    }
-   const key=state.join(',');if(signature===key)return;signature=key;cones=[];
-   camera.getWorldPosition(eye);
-   for(const mesh of eligible){
-    const geometry=mesh.geometry,pos=geometry.getAttribute('position'),index=geometry.index;
-    const start=geometry.drawRange.start,end=Math.min(index?.count??pos.count,start+geometry.drawRange.count);
-    for(let i=0;i<(mesh.isInstancedMesh?mesh.count:1);i++){
-     if(mesh.isInstancedMesh){mesh.getMatrixAt(i,instance);world.multiplyMatrices(mesh.matrixWorld,instance);}else world.copy(mesh.matrixWorld);
-     // Mirrored surfaces complicate front-face winding. Leave them open.
-     if(world.determinant()<=0)continue;
-     for(let j=start;j+2<end;j+=3){
-      a.fromBufferAttribute(pos,index?index.getX(j):j).applyMatrix4(world);b.fromBufferAttribute(pos,index?index.getX(j+1):j+1).applyMatrix4(world);c.fromBufferAttribute(pos,index?index.getX(j+2):j+2).applyMatrix4(world);
-      if([a,b,c].some(p=>view.copy(p).applyMatrix4(camera.matrixWorldInverse).z>=-Math.max(camera.near*4,0.25)))continue;
-      const facing=new T.Vector3().subVectors(b,a).cross(new T.Vector3().subVectors(c,a)).dot(view.subVectors(eye,a));
-      if(mesh.material.side===T.FrontSide&&facing<=0||mesh.material.side===T.BackSide&&facing>=0)continue;
-      const cone=triangleOcclusionCone(a,b,c,eye,camera.near);if(cone)cones.push(cone);
+   eligibleMeshes=eligible.length;
+   const geometryKey=state.join(',');
+   if(geometrySignature!==geometryKey){
+    geometrySignature=geometryKey;triangles=[];
+    // World triangles are static until asset/instance/material state changes.
+    // Camera motion never re-transforms or re-reads their original vertices.
+    for(const mesh of eligible){
+     const geometry=mesh.geometry,pos=geometry.getAttribute('position'),index=geometry.index;
+     const start=geometry.drawRange.start,end=Math.min(index?.count??pos.count,start+geometry.drawRange.count);
+     for(let i=0;i<(mesh.isInstancedMesh?mesh.count:1);i++){
+      if(mesh.isInstancedMesh){mesh.getMatrixAt(i,instance);world.multiplyMatrices(mesh.matrixWorld,instance);}else world.copy(mesh.matrixWorld);
+      if(world.determinant()<=0)continue;
+      for(let j=start;j+2<end;j+=3){
+       const a=new T.Vector3().fromBufferAttribute(pos,index?index.getX(j):j).applyMatrix4(world),b=new T.Vector3().fromBufferAttribute(pos,index?index.getX(j+1):j+1).applyMatrix4(world),c=new T.Vector3().fromBufferAttribute(pos,index?index.getX(j+2):j+2).applyMatrix4(world);
+       triangles.push({a,b,c,side:mesh.material.side,normal:new T.Vector3().subVectors(b,a).cross(new T.Vector3().subVectors(c,a))});
+      }
      }
     }
    }
-   // A bounded proof set prevents distant forest scans scaling with scene detail.
-   // Omitting a small triangle can only retain extra plants.
+   const key=[geometryKey,...camera.matrixWorld.elements,...camera.projectionMatrix.elements,camera.near,camera.layers.mask].join(',');
+   if(signature===key)return;signature=key;cones=[];for(const bin of bins)bin.length=0;
+   camera.getWorldPosition(eye);vp.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+   for(const triangle of triangles){
+    const {a,b,c,normal}=triangle;
+    if([a,b,c].some(p=>view.copy(p).applyMatrix4(camera.matrixWorldInverse).z>=-Math.max(camera.near*4,.25)))continue;
+    const facing=normal.dot(view.subVectors(eye,a));
+    if(triangle.side===T.FrontSide&&facing<=0||triangle.side===T.BackSide&&facing>=0)continue;
+    const cone=triangleOcclusionCone(a,b,c,eye,camera.near);if(!cone)continue;
+    const planes=new Float64Array(16);for(const [i,p] of [cone.plane,...cone.edges].entries())planes.set([p.normal.x,p.normal.y,p.normal.z,p.constant],i*4);
+    const bounds={minX:Infinity,maxX:-Infinity,minY:Infinity,maxY:-Infinity};for(const p of [a,b,c]){projected.copy(p).applyMatrix4(vp);bounds.minX=Math.min(bounds.minX,projected.x);bounds.maxX=Math.max(bounds.maxX,projected.x);bounds.minY=Math.min(bounds.minY,projected.y);bounds.maxY=Math.max(bounds.maxY,projected.y);}
+    if(bounds.maxX<-1||bounds.minX>1||bounds.maxY<-1||bounds.minY>1)continue;
+    cones.push({planes,area:cone.area,bounds});
+   }
    cones.sort((a,b)=>b.area-a.area);cones.length=Math.min(cones.length,128);
+   const cell=x=>Math.max(0,Math.min(side-1,Math.floor((x+1)*.5*side)));
+   for(const cone of cones){const b=cone.bounds;for(let y=cell(b.minY);y<=cell(b.maxY);y++)for(let x=cell(b.minX);x<=cell(b.maxX);x++)bins[y*side+x].push(cone);}
+   reason=cones.length?'ready':eligibleMeshes?'no-covering-triangles':'no-eligible-materials';
   },
-  rejects(sphere){tested++;if(cones.some(cone=>sphereBehindTriangle(sphere,cone))){rejected++;return true;}return false;},
-  stats:()=>({enabled,occluderMeshes:meshes.length,proofTriangles:cones.length,tested,rejected,policy:'actual opaque triangle cone; canopy deformation bounds; main view only'})
+  rejects:sphere=>rejectsXYZ(sphere.center.x,sphere.center.y,sphere.center.z,sphere.radius),rejectsXYZ,
+  stats:()=>({enabled,occluderMeshes:meshes.length,eligibleMeshes,sourceTriangles:triangles.length,proofTriangles:cones.length,tested,rejected,planeTests,screenBins:bins.length,reason,policy:'actual opaque triangle cone; 16x16 candidate grid; precomputed canopy bounds; main view only'})
  };
 }
 
