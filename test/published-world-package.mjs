@@ -89,7 +89,9 @@ test('publication validates every active application chunk and explicitly distin
  }
 });
 
-test('private Fred Warehouse package pins both print texture tiers and preserves geometry and material semantics',async()=>{
+const openingRepository=new URL(JSON.parse(await fs.readFile(path.join(root,'opening-world.json'),'utf8')).repository);
+const fredWarehouse=/^\/lozknowles\/fred\/tree\/[a-f0-9]{40}$/.test(openingRepository.pathname)&&openingRepository.origin==='https://github.com';
+test('private Fred Warehouse package pins both print texture tiers and preserves geometry and material semantics',{skip:!fredWarehouse},async()=>{
  const opening=catalog.worlds.find(w=>w.worldId===catalog.openingWorldId),directory=path.join(root,opening.bundlePath),manifest=JSON.parse(await fs.readFile(path.join(directory,'world.json'))),assets=JSON.parse(await fs.readFile(path.join(directory,manifest.components.assets.path)));
  const asset=assets.find(a=>a.id==='warehouse:architectural-print-tiers');assert.ok(asset,'Warehouse print tier asset is present');
  assert.deepEqual(asset.file,{path:'assets/15522364853a4f2d5de927577b3ac9c8afcccb7033b7e327d47b3598f044a644.glb',sha256:'15522364853a4f2d5de927577b3ac9c8afcccb7033b7e327d47b3598f044a644',bytes:4412});
