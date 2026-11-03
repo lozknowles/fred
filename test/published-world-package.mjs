@@ -9,6 +9,7 @@ import {readNeonShiftPublication} from '../tools/neon-shift-publication.mjs';
 import {TABLE_TENNIS_SPLAT_PROFILE,assertQualifiedSplatProfile} from '../src/world-runtime/SplatSceneProfiles.js';
 import {validatePublishedWorldCatalog} from '../src/world-runtime/PublishedWorldCatalog.js';
 import {patchOutputSurface,outputSurfaceManifestName,outputSurfaceTransformVersion} from '../tools/output-surface-transform.mjs';
+import {assertTextureTierCompatible,textureTierReferences} from '../src/world-runtime/RepositoryTextureTiers.js';
 const arg=process.env.PUBLIC_ROOM_PACKAGE??process.env.PUBLIC_SUNSET_PACKAGE;
 if(!arg)throw Error('PUBLIC_ROOM_PACKAGE (or legacy PUBLIC_SUNSET_PACKAGE) must identify the generated publication candidate');
 const root=await fs.realpath(arg),sha=b=>createHash('sha256').update(b).digest('hex');
@@ -53,7 +54,22 @@ test('active publication closure excludes retired Sunset identities and payloads
  // deliberately outside this active-world payload/route closure assertion.
 });
 
-test('publication retains module closure used by an already-open warehouse tab',async()=>{
+test('publication validates every active application chunk and explicitly distinguishes fresh-origin compatibility',async()=>{
+ const publication=JSON.parse(await fs.readFile(path.join(root,'publication.json'),'utf8')),assets=publication.applicationAssets;
+ assert.ok(assets,'Application closure and origin mode must be explicitly recorded');
+ assert.ok(['fresh-origin','compatible-update'].includes(assets.mode));
+ assert.ok(Object.keys(assets.current).length>0&&Object.keys(assets.current).length<=256);
+ assert.deepEqual(Object.fromEntries(Object.entries(assets.current).filter(([name])=>name.endsWith('.js'))),publication.outputSurfaceDerivative.finalChunks,'every active JS chunk agrees with the independent build derivative manifest');
+ for(const [name,digest]of [...Object.entries(assets.current),...Object.entries(assets.compatibility)]){
+  assert.match(name,/^assets\/[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_-]{8}\.(?:js|css)$/);assert.match(digest,/^[a-f0-9]{64}$/);
+  const file=path.join(root,name),stat=await fs.lstat(file);assert.ok(stat.isFile()&&!stat.isSymbolicLink());assert.equal(sha(await fs.readFile(file)),digest,name);
+ }
+ assert.deepEqual((await fs.readdir(path.join(root,'assets'))).sort(),[...new Set([...Object.keys(assets.current),...Object.keys(assets.compatibility)])].map(name=>name.slice('assets/'.length)).sort(),'no undeclared active or historical application chunks');
+ for(const entry of ['index.html','worlds.html']){
+  const html=await fs.readFile(path.join(root,entry),'utf8');let refs=0;
+  for(const [,name]of html.matchAll(/(?:src|href)="(?:\.\/)?(assets\/[^"?#]+\.(?:js|css))"/g)){assert.ok(Object.hasOwn(assets.current,name),'entry point refers to an active authenticated chunk: '+name);refs++;}
+  assert.ok(refs>0,entry+' contains current application entries');
+ }
  const expected={
   'SplatScenePhysics-DnwdxMwA.js':'cffd6f1f388a979e70461b469c3ebaa7461b2525e3b886b490187c86a2d331ff',
   'WebGLPortalViews-K8knYW1g.js':'7230cc9e81593b9903b2ec882dcd1a5dcdc8247229417bde5fd4066f5c18025e',
@@ -62,9 +78,25 @@ test('publication retains module closure used by an already-open warehouse tab',
   'spark.module-BgZ7pwUd.js':'fd9e32f82ef4f43b39d3d76002b0467b51d1310a84a597a64a2578dcb036c2bf',
   'world-engine-contract-BU9EDy71.js':'9e8a17d54f4831e6ea9f639f0c7b07ed6bd32c4faf25c4a423cf460a59629a31'
  };
+ if(assets.mode==='fresh-origin'){
+  assert.deepEqual(assets.compatibility,{},'only the explicit fresh-origin mode permits excluding historical chunks');
+  for(const name of Object.keys(expected))if(!Object.hasOwn(assets.current,'assets/'+name))await assert.rejects(fs.access(path.join(root,'assets',name)),{code:'ENOENT'});
+  return;
+ }
  for(const [name,digest] of Object.entries(expected)){
+  assert.equal(assets.compatibility['assets/'+name],digest,'normal updates retain the already-open tab closure');
   const bytes=await fs.readFile(path.join(root,'assets',name));assert.equal(sha(bytes),digest,name);
  }
+});
+
+test('private Fred Warehouse package pins both print texture tiers and preserves geometry and material semantics',async()=>{
+ const opening=catalog.worlds.find(w=>w.worldId===catalog.openingWorldId),directory=path.join(root,opening.bundlePath),manifest=JSON.parse(await fs.readFile(path.join(directory,'world.json'))),assets=JSON.parse(await fs.readFile(path.join(directory,manifest.components.assets.path)));
+ const asset=assets.find(a=>a.id==='warehouse:architectural-print-tiers');assert.ok(asset,'Warehouse print tier asset is present');
+ assert.deepEqual(asset.file,{path:'assets/15522364853a4f2d5de927577b3ac9c8afcccb7033b7e327d47b3598f044a644.glb',sha256:'15522364853a4f2d5de927577b3ac9c8afcccb7033b7e327d47b3598f044a644',bytes:4412});
+ const refs=textureTierReferences(asset);assert.deepEqual(refs,[{path:'assets/5965c0a70d98e38c44d6b7abb2f43e00b6d3c0cfcc7343eac92be8ac08f29934.glb',sha256:'5965c0a70d98e38c44d6b7abb2f43e00b6d3c0cfcc7343eac92be8ac08f29934',bytes:565148,distance:8}]);
+ const coarse=await fs.readFile(path.join(directory,asset.file.path)),fine=await fs.readFile(path.join(directory,refs[0].path));
+ for(const [ref,bytes]of [[asset.file,coarse],[refs[0],fine]]){assert.equal(bytes.byteLength,ref.bytes);assert.equal(sha(bytes),ref.sha256);}
+ assertTextureTierCompatible(coarse,fine);
 });
 
 test('published local duck has exact admitted model bytes, separate notices and no full-resolution source',async()=>{

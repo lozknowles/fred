@@ -77,6 +77,20 @@ if(shiftPackage){const destination=path.join(output,shift.bundlePath);await fs.m
 async function inspect(dir){const info=await fs.lstat(dir);if(info.isSymbolicLink())throw Error('Symlink in public editor');if(info.isDirectory())for(const name of await fs.readdir(dir))await inspect(path.join(dir,name));else if(!info.isFile())throw Error('Invalid editor file');}
 // Keep bounded immutable asset names used by tabs opened before this release.
 const priorAssets=path.join(previous,'assets'),outputAssets=path.join(output,'assets');
+const applicationAssets={mode:mode==='--fresh-origin'?'fresh-origin':'compatible-update',current:{},compatibility:{}};
+// Record all active JS/CSS bytes independently of the historical compatibility
+// set. A fresh origin deliberately has an empty compatibility set, not an
+// exemption from validating the newly built application closure.
+const currentNames=(await fs.readdir(path.join(build,'assets'))).sort();
+if(currentNames.length>256)throw Error('Too many current application assets');
+for(const name of currentNames){
+ if(!/^[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(name))throw Error('Unexpected current application asset');
+ const from=path.join(build,'assets',name),info=await fs.lstat(from),target=path.join(outputAssets,name);
+ if(!info.isFile()||info.isSymbolicLink()||info.size>8*1024*1024)throw Error('Invalid current application asset');
+ const digest=await repositoryDigest(new Uint8Array(await fs.readFile(from)));
+ if(await repositoryDigest(new Uint8Array(await fs.readFile(target)))!==digest)throw Error('Current application asset not preserved');
+ applicationAssets.current['assets/'+name]=digest;
+}
 // A new origin has no existing visitors that could request historical chunks.
 // The prior editor, its licences and the world provenance are still preserved.
 const priorNames=mode==='--fresh-origin'?[]:await fs.readdir(priorAssets);if(priorNames.length>96)throw Error('Too many prior application assets');
@@ -85,6 +99,7 @@ for(const name of priorNames){
  if(name.includes('..')||!/^[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(name))throw Error('Unexpected prior application asset');
  const from=path.join(priorAssets,name),info=await fs.lstat(from);
  if(!info.isFile()||info.isSymbolicLink()||info.size>5*1024*1024)throw Error('Invalid prior application asset');
+ applicationAssets.compatibility['assets/'+name]=await repositoryDigest(new Uint8Array(await fs.readFile(from)));
  const target=path.join(outputAssets,name);
  const existing=await fs.lstat(target).catch(error=>{if(error.code==='ENOENT')return null;throw error;});
  if(existing){if(!existing.isFile()||existing.isSymbolicLink()||existing.size!==info.size||await repositoryDigest(new Uint8Array(await fs.readFile(target)))!==await repositoryDigest(new Uint8Array(await fs.readFile(from))))throw Error('Application asset name collision');continue;}
@@ -124,6 +139,6 @@ const sourceContract=await fs.readFile(new URL('../src/world-runtime/vendor/worl
 // Upstream contract provenance covers its unchanged source bytes only.
 // Record and preserve the build derivative separately, including final chunks.
 const outputSurfaceDerivative=await packageOutputSurfaceDerivative(build,output);
-await fs.writeFile(path.join(output,'publication.json'),JSON.stringify({schema:'elsemesh.publication/1',outputSurfaceDerivative,...preserved,engineCommit,worldContract:{sourceNormalization:'UTF-8 LF',commit:contractProvenance.commit,bundleSha256:contractProvenance.bundleSha256,baseBundleSha256:contractProvenance.baseBundleSha256??contractProvenance.bundleSha256,downstreamPatches:contractProvenance.downstreamPatches??[]},worldRepositoryCommit:commit,openingWorldId:opening.worldId,worlds:catalog.worlds,routes:catalog.routes,...(dockPackage?{dock:{sourceCommit:'fbc9f7e352b03b18d96ad428742770f844fcfc0d',contentDigest:DOCK_CONTENT_DIGEST,bytes:dockPackage.total,files:dockPackage.files.size}}:{}),scene:{name:TABLE_TENNIS_SPLAT_PROFILE.name,count:TABLE_TENNIS_SPLAT_PROFILE.asset.count,assetSha256:loaded.project.splatScene.asset.sha256,physicsSha256:loaded.project.splatScene.physics.sha256,sourceManifestSha256:provenance.sourceManifestSha256,reviewSha256:provenance.reviewSha256,auditedOriginalBytes:originalBytes},previousPublicEditorPreserved:true},null,2)+'\n');
+await fs.writeFile(path.join(output,'publication.json'),JSON.stringify({schema:'elsemesh.publication/1',applicationAssets,outputSurfaceDerivative,...preserved,engineCommit,worldContract:{sourceNormalization:'UTF-8 LF',commit:contractProvenance.commit,bundleSha256:contractProvenance.bundleSha256,baseBundleSha256:contractProvenance.baseBundleSha256??contractProvenance.bundleSha256,downstreamPatches:contractProvenance.downstreamPatches??[]},worldRepositoryCommit:commit,openingWorldId:opening.worldId,worlds:catalog.worlds,routes:catalog.routes,...(dockPackage?{dock:{sourceCommit:'fbc9f7e352b03b18d96ad428742770f844fcfc0d',contentDigest:DOCK_CONTENT_DIGEST,bytes:dockPackage.total,files:dockPackage.files.size}}:{}),scene:{name:TABLE_TENNIS_SPLAT_PROFILE.name,count:TABLE_TENNIS_SPLAT_PROFILE.asset.count,assetSha256:loaded.project.splatScene.asset.sha256,physicsSha256:loaded.project.splatScene.physics.sha256,sourceManifestSha256:provenance.sourceManifestSha256,reviewSha256:provenance.reviewSha256,auditedOriginalBytes:originalBytes},previousPublicEditorPreserved:true},null,2)+'\n');
 if(shiftPackage){const file=path.join(output,'publication.json'),publication=JSON.parse(await fs.readFile(file,'utf8'));publication.neonShift={contentDigest:SHIFT_CONTENT_DIGEST,intervalMs:60000,bytes:shiftPackage.total,files:shiftPackage.files.size,implementation:'engine-owned WebGL procedural visual pool; fixed authored collision and return anchor'};await fs.writeFile(file,JSON.stringify(publication,null,2)+'\n');}
 console.log(JSON.stringify({output,worldRepositoryCommit:commit,roomBytes:total,auditedOriginalBytes:originalBytes,originalSourcesBundled:false,worlds:catalog.worlds}));
