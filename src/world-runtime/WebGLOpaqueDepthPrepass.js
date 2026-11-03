@@ -4,11 +4,34 @@ import {T} from './vendor/world-engine-contract.js';
 // or content digest requires fresh visual and performance qualification.
 const QUALIFIED_WAREHOUSE_WORLD_ID='elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319';
 const QUALIFIED_WAREHOUSE_CONTENT_DIGEST='fcba18b28ac9b8bf7ef52a1fc8ba0d3dc489d0bd4c94c651cdc559a7617a0e5d';
+// Candidate admission is restricted to the exact device/context identity measured
+// locally. Other adapters and unavailable privacy-protected identities stay off.
+const CANDIDATE_WAREHOUSE_CONTENT_DIGEST='78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b';
+const CANDIDATE_RENDERER='ANGLE (Intel, Intel(R) Arc(TM) Graphics (0x00007D55) Direct3D11 vs_5_0 ps_5_0, D3D11)';
 
 export function getQualifiedWarehouseDepthOccluders(active){
  if(!active||active.disposed||active.identity?.worldId!==QUALIFIED_WAREHOUSE_WORLD_ID||
   active.identity.contentDigest!==QUALIFIED_WAREHOUSE_CONTENT_DIGEST)return [];
  return active.depthOccluders??[];
+}
+
+/** Resolve the candidate device grant once at renderer creation, never per draw.
+ * Context changes revoke it; a replacement context needs fresh qualification.
+ * The legacy content grant and all render-time eligibility guards are unchanged.
+ */
+export function createQualifiedWarehouseDepthOccluderProvider(renderer){
+ let qualified=false;
+ if(renderer?.isWebGLRenderer&&typeof renderer.domElement?.addEventListener==='function'){
+  try{
+   const gl=renderer.getContext(),extension=gl.getExtension('WEBGL_debug_renderer_info');
+   qualified=!!extension&&!gl.isContextLost()&&gl.getParameter(extension.UNMASKED_RENDERER_WEBGL)===CANDIDATE_RENDERER;
+   if(qualified){const revoke=()=>{qualified=false;};renderer.domElement.addEventListener('webglcontextlost',revoke,{once:true});renderer.domElement.addEventListener('webglcontextrestored',revoke,{once:true});}
+  }catch{qualified=false;}
+ }
+ return active=>{
+  if(qualified&&active&&!active.disposed&&active.identity?.worldId===QUALIFIED_WAREHOUSE_WORLD_ID&&active.identity.contentDigest===CANDIDATE_WAREHOUSE_CONTENT_DIGEST)return active.depthOccluders??[];
+  return getQualifiedWarehouseDepthOccluders(active);
+ };
 }
 
 function supportedCompileChain(mesh,m){

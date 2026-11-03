@@ -8,7 +8,7 @@ import {advanceNeonShiftClock} from './NeonShiftLayout.js';
 import {WebGLSunsetOutput} from './WebGLSunsetOutput.js';
 import {graphicsSceneEligible} from './GraphicsRuntimeState.js';
 import {OpeningProgress} from './OpeningProgress.js';
-import {renderWebGLOpaqueDepthPrepass,getQualifiedWarehouseDepthOccluders} from './WebGLOpaqueDepthPrepass.js';
+import {renderWebGLOpaqueDepthPrepass,createQualifiedWarehouseDepthOccluderProvider} from './WebGLOpaqueDepthPrepass.js';
 import { repositoryWeatherShelters, setMistShelters } from './WeatherShelter.js';
 import {MediaScreen,collectMediaScreenOccluders,mediaScreenCellVisibility} from './MediaScreen.js';
 import {RepositoryPortalSky} from './RepositoryPortalSky.js';
@@ -173,7 +173,8 @@ async function init(){
  const avatar=isWebGL?new WebGLRepositoryAvatar(engine.scene,{prepareResources:engine.prepareRepositoryResources}):new ReadiedRepositoryAvatar(engine.scene,{model:{wheelPivot:{position:new N.Vector3()},lines:{deckY:0},group:new N.Group()},getYaw:()=>0},{prepareResources:engine.prepareRepositoryResources});
  arrivals=new PortalArrivalController({runtime:portals,localAvatar:avatar});
  const openingPlayer={avatarAppearance:loadAppearance()};
- const opaqueDepthPrepass={enabled:true,phase:'idle',lastResult:null,occluders:()=>getQualifiedWarehouseDepthOccluders(host.active)};
+ const qualifiedDepthOccluders=createQualifiedWarehouseDepthOccluderProvider(renderer);
+ const opaqueDepthPrepass={enabled:true,phase:'idle',lastResult:null,occluders:()=>qualifiedDepthOccluders(host.active)};
  let sunsetOutput=null;
  const renderMainScene=()=>{
   const draw=()=>{

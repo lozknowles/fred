@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
-import {getQualifiedWarehouseDepthOccluders,isEligibleWebGLDepthOccluder,renderWebGLOpaqueDepthPrepass} from '../src/world-runtime/WebGLOpaqueDepthPrepass.js';
+import {createQualifiedWarehouseDepthOccluderProvider,getQualifiedWarehouseDepthOccluders,isEligibleWebGLDepthOccluder,renderWebGLOpaqueDepthPrepass} from '../src/world-runtime/WebGLOpaqueDepthPrepass.js';
 import {updateWebGLWeatherShelter} from '../src/world-runtime/WebGLWeatherShelter.js';
 import {webGLRepositoryReadinessSignature} from '../src/world-runtime/WebGLRepositoryReadiness.js';
 
@@ -17,6 +17,46 @@ function fixture(){
 }
 
 const qualifiedIdentity={worldId:'elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319',contentDigest:'fcba18b28ac9b8bf7ef52a1fc8ba0d3dc489d0bd4c94c651cdc559a7617a0e5d'};
+const candidateIdentity={...qualifiedIdentity,contentDigest:'78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b'},arcRenderer='ANGLE (Intel, Intel(R) Arc(TM) Graphics (0x00007D55) Direct3D11 vs_5_0 ps_5_0, D3D11)';
+function device(renderer,identity=arcRenderer){let queries=0,contexts=0;const canvas=new EventTarget(),gl={getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),isContextLost:()=>false,getParameter(){queries++;return identity;}};renderer.domElement=canvas;renderer.getContext=()=>{contexts++;return gl;};return {gl,canvas,counts:()=>({queries,contexts})};}
+
+test('current Warehouse candidate requires the exact measured Arc device, queried once per provider',()=>{
+ for(const name of [arcRenderer,null,'',arcRenderer.replace('0x00007D55','0x00007D45'),arcRenderer.replace('D3D11)','Vulkan)'), 'ANGLE (NVIDIA)', 'SwiftShader']){
+  const f=fixture(),d=device(f.r,name),provide=createQualifiedWarehouseDepthOccluderProvider(f.r),active={identity:{...candidateIdentity},depthOccluders:[f.wall,f.child]};
+  for(let frame=0;frame<20;frame++)assert.equal(provide(active).length,name===arcRenderer?2:0);
+  assert.deepEqual(d.counts(),{queries:1,contexts:1});
+  assert.equal(provide({identity:{...qualifiedIdentity},depthOccluders:[f.wall]}).length,1,'legacy admission remains independent of adapter');
+  assert.deepEqual(getQualifiedWarehouseDepthOccluders(active),[],'legacy API does not broaden admission');
+ }
+ const f=fixture(),d=device(f.r);f.r.isWebGLRenderer=false;const provide=createQualifiedWarehouseDepthOccluderProvider(f.r);assert.deepEqual(provide({identity:candidateIdentity,depthOccluders:[f.wall]}),[]);assert.deepEqual(d.counts(),{queries:0,contexts:0});
+ for(const mode of ['extension','exception','lost','canvas']){const f=fixture(),d=device(f.r);if(mode==='extension')d.gl.getExtension=()=>null;if(mode==='exception')d.gl.getParameter=()=>{throw Error('privacy');};if(mode==='lost')d.gl.isContextLost=()=>true;if(mode==='canvas')delete f.r.domElement;const provide=createQualifiedWarehouseDepthOccluderProvider(f.r);assert.deepEqual(provide({identity:candidateIdentity,depthOccluders:[f.wall]}),[]);}
+});
+
+test('candidate provider rechecks current world, exact bytes and disposal; context changes revoke its grant',()=>{
+ const f=fixture(),d=device(f.r),provide=createQualifiedWarehouseDepthOccluderProvider(f.r),active={identity:{...candidateIdentity},depthOccluders:[f.wall]};assert.equal(provide(active),active.depthOccluders);
+ for(const value of [null,{}, {...active,disposed:true},{...active,identity:{...candidateIdentity,worldId:'foreign'}},{...active,identity:{...candidateIdentity,contentDigest:'changed'}}])assert.deepEqual(provide(value),[]);
+ active.depthOccluders=[f.child];assert.equal(provide(active),active.depthOccluders);active.disposed=true;assert.deepEqual(provide(active),[]);active.disposed=false;
+ d.canvas.dispatchEvent(new Event('webglcontextlost'));assert.deepEqual(provide(active),[]);d.canvas.dispatchEvent(new Event('webglcontextrestored'));assert.deepEqual(provide(active),[]);assert.deepEqual(d.counts(),{queries:1,contexts:1});
+ assert.equal(provide({identity:qualifiedIdentity,depthOccluders:[f.wall]}).length,1,'context grant revocation preserves legacy policy');
+ const fresh=createQualifiedWarehouseDepthOccluderProvider(f.r);assert.equal(fresh(active).length,1);assert.deepEqual(d.counts(),{queries:2,contexts:2});d.canvas.dispatchEvent(new Event('webglcontextrestored'));assert.deepEqual(fresh(active),[],'restoration alone also revokes stale identity');
+});
+
+test('qualified candidate still rejects portal/unsupported cameras and foreign or stale scene meshes',()=>{
+ for(const mode of ['main','array-camera','orthographic','portal-target','portal-clip','foreign-scene','stale-list']){
+  const f=fixture();device(f.r);const provide=createQualifiedWarehouseDepthOccluderProvider(f.r),active={identity:candidateIdentity,depthOccluders:[f.wall,f.child]};
+  if(mode==='array-camera')f.camera.isArrayCamera=true;if(mode==='orthographic')f.camera.isPerspectiveCamera=false;if(mode==='portal-target')f.r.getRenderTarget=()=>({});if(mode==='portal-clip')f.r.clippingPlanes=[new T.Plane()];if(mode==='foreign-scene')active.depthOccluders=[fixture().wall];if(mode==='stale-list'){f.wall.removeFromParent();f.child.removeFromParent();}
+  const result=renderWebGLOpaqueDepthPrepass({renderer:f.r,scene:f.scene,camera:f.camera,occluders:provide(active)});assert.equal(result.used,mode==='main',mode);assert.equal(f.observations.length,mode==='main'?2:1);if(mode==='main')assert.equal(result.depthDrawCalls,2);
+ }
+});
+
+test('candidate admission never bypasses current material compile eligibility or renderer loss',()=>{
+ const f=fixture(),d=device(f.r),provide=createQualifiedWarehouseDepthOccluderProvider(f.r),active={identity:candidateIdentity,depthOccluders:[f.wall]};
+ updateWebGLWeatherShelter({scene:f.scene,camera:f.camera},null,0,true);
+ const draw=()=>renderWebGLOpaqueDepthPrepass({renderer:f.r,scene:f.scene,camera:f.camera,occluders:provide(active)});
+ assert.equal(draw().used,true,'real audited shelter installer remains eligible');
+ const hook=f.material.onBeforeCompile;f.material.onBeforeCompile=()=>{};assert.equal(draw().used,false,'changed compile hook revokes eligibility on the next frame');f.material.onBeforeCompile=hook;assert.equal(draw().used,true);
+ d.canvas.dispatchEvent(new Event('webglcontextlost'));assert.equal(draw().used,false);assert.equal(d.counts().queries,1);
+});
 
 test('only the qualified Warehouse world and exact content bytes supply current occluders',()=>{
  const invalid=[null,{}, {identity:{}}, {identity:{worldId:qualifiedIdentity.worldId}},
