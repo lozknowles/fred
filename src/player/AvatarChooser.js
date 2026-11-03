@@ -1,4 +1,5 @@
 import { AVATAR_STYLES, loadAppearance, saveAppearance } from './AvatarAppearance.js';
+import { loadFacePhoto, saveFacePhoto, removeFacePhoto, subscribeFacePhoto, decodeFacePhoto, encodeFacePhoto, loadFacePhotoImage } from './AvatarFacePhotoStore.js';
 
 const palettes = {
 	shirt: ['#7194aa','#c54343','#33785b','#e8c653','#f2eee3','#343642'],
@@ -7,9 +8,22 @@ const palettes = {
 	hair: ['#171512','#33251c','#754a2e','#a95732','#d8b779','#adadab'],
 };
 let styled = false;
+// Only the owner's chooser is wired to browser storage. Remote avatar instances
+// never read the owner's photo or carry it in their appearance packet.
+export function attachLocalFacePhotoStore(chooser, read=loadFacePhoto, subscribe=subscribeFacePhoto) {
+	if (!chooser.app?.avatar) return () => {};
+	const restore = () => {
+		if (chooser.dialog.open) return;
+		chooser.faceDraft = read();
+		chooser.updateFacePreview();
+	};
+	const unsubscribe=subscribe(restore);
+	restore();
+	return unsubscribe;
+}
 export class AvatarChooser {
 	constructor({ app = null, parent = document.body } = {}) {
-		this.app = app; this.value = loadAppearance();
+		this.app = app; this.value = loadAppearance(); this.faceRevision=0; this.faceTask=Promise.resolve(); this.faceBusy=false;
 		try { this.name = localStorage.getItem('elsemesh.avatar.name') || 'Explorer'; } catch { this.name = 'Explorer'; }
 		if(app) app.player.displayName = this.name;
 		if (app) { app.player.avatarAppearance = { ...this.value }; app.avatar.setAppearance(this.value)?.catch(() => {}); }
@@ -24,7 +38,7 @@ export class AvatarChooser {
 		parent.append(this.button); this.button.onclick = () => this.show();
 		this.dialog = document.createElement('dialog'); this.dialog.className = 'elsemesh-avatar-dialog' + (app ? ' game' : '');
 		this.dialog.setAttribute('aria-label','Choose your avatar');
-		this.dialog.innerHTML = `<h2>Your island explorer</h2><img alt="Character style reference"><p>Choose a character and make it yours. Your friends see the same appearance.</p><label for="elsemesh-avatar-style">Character & hairstyle</label><select id="elsemesh-avatar-style"></select><p>Style reference shown above. Colours apply to your character in the game. Skin tone is independent of gender.</p><div class="elsemesh-avatar-fields"></div><p class="elsemesh-avatar-status" role="status"></p><div class="elsemesh-avatar-actions"><button class="save">Save avatar</button><button class="cancel">Cancel</button></div>`;
+		this.dialog.innerHTML = `<h2>Your island explorer</h2><img alt="Character style reference"><p>Choose a character and make it yours. Your friends see your character style and colours.</p><label for="elsemesh-avatar-style">Character & hairstyle</label><select id="elsemesh-avatar-style"></select><p>Style reference shown above. Colours apply to your character in the game. Skin tone is independent of gender.</p><div class="elsemesh-avatar-fields"></div><p class="elsemesh-avatar-status" role="status"></p><div class="elsemesh-avatar-actions"><button class="save">Save avatar</button><button class="cancel">Cancel</button></div>`;
 		document.body.append(this.dialog);
 		const nameLabel=document.createElement('label'); nameLabel.textContent='Character name'; nameLabel.htmlFor='elsemesh-avatar-name';
 		this.nameInput=document.createElement('input'); this.nameInput.id=nameLabel.htmlFor; this.nameInput.maxLength=24; this.nameInput.autocomplete='off';
@@ -46,9 +60,25 @@ export class AvatarChooser {
 			input.oninput = () => { this.draft[key]=input.value; this.refresh(); this.preview(); }; row.append(input);
 			this.dialog.querySelector('.elsemesh-avatar-fields').append(label,row);
 		}
+		this.createFaceEditor();
+		const unsubscribe=attachLocalFacePhotoStore(this);
+		const stop=event=>{
+			if(event.persisted)return;
+			unsubscribe();
+			window.removeEventListener('pagehide',stop);
+		};
+		window.addEventListener('pagehide',stop);
 		this.dialog.querySelector('.save').onclick = async () => {
-			const save=this.dialog.querySelector('.save'); save.disabled=true;
+			if(this.faceBusy) { this.status('Wait for your photo to finish loading.'); return; }
+			this.saving=true;
+			const controls=[...this.dialog.querySelectorAll('button,input,select')].map(control=>[control,control.disabled]);
+			for(const [control] of controls) control.disabled=true;
 			try {
+				await this.faceTask;
+				if(this.faceChanged) {
+					try { if(this.faceDraft) saveFacePhoto(this.faceDraft); else removeFacePhoto(); }
+					catch { this.status('Photo could not be saved in browser storage. Your previous saved photo is unchanged. Free browser storage and try again.'); return; }
+				}
 				if (app) await app.avatar.setAppearance(this.draft);
 				this.value={...this.draft}; const saved=saveAppearance(this.value);
 				this.name=this.nameInput.value.trim().replace(/[\x00-\x1f<>]/g,'').slice(0,24) || 'Explorer';
@@ -58,10 +88,61 @@ export class AvatarChooser {
 				if (!saved) { this.status('Applied for this session. Browser storage is unavailable.'); return; }
 				this.close(true);
 			} catch { this.status('Could not load this character. Please try again.'); }
-			finally { save.disabled=false; }
+			finally { for(const [control,disabled] of controls) control.disabled=disabled; this.saving=false; }
 		};
 		this.dialog.querySelector('.cancel').onclick = () => this.close(false);
 		this.dialog.addEventListener('cancel',event => { event.preventDefault(); this.close(false); });
+	}
+	createFaceEditor() {
+		const section=document.createElement('section'); section.setAttribute('aria-label','Local face photo');
+		section.innerHTML=`<h3>Face photo · this browser only</h3><p>Choose a clear front-facing portrait. Centre your face in the square and adjust the eyes and mouth on your character. This flat photo is applied to the front of the head. Face photos stay in this browser and are visible only on your own character.</p><label for="elsemesh-face-file">Local PNG, JPEG or WebP (up to 8 MB)</label><input id="elsemesh-face-file" type="file" accept="image/png,image/jpeg,image/webp"><canvas width="256" height="256" aria-label="Square photo crop preview" role="img" style="display:block;width:180px;height:180px;margin:12px 0;background:#173541"></canvas><p class="face-empty"></p><div class="face-controls"></div><button type="button" class="face-remove">Remove face photo</button>`;
+		this.faceSection=section; this.faceCanvas=section.querySelector('canvas'); this.faceOptions={x:0,y:0,zoom:1,rotation:0};
+		for(const [key,label,min,max,step] of [['x','Move photo horizontally',-1,1,.01],['y','Move photo vertically',-1,1,.01],['zoom','Photo zoom',1,4,.01],['rotation','Photo rotation (degrees)',-180,180,1]]) {
+			const labelEl=document.createElement('label'); labelEl.textContent=label; labelEl.htmlFor=`elsemesh-face-${key}`;
+			const input=document.createElement('input'); input.id=labelEl.htmlFor; input.type='range'; input.min=min; input.max=max; input.step=step; input.value=this.faceOptions[key]; input.dataset.faceControl=key;
+			input.oninput=()=>{ if(!this.faceSource) return; this.faceOptions[key]=Number(input.value); this.faceDraft=encodeFacePhoto(this.faceSource,this.faceOptions); this.faceChanged=true; this.updateFacePreview(); };
+			section.querySelector('.face-controls').append(labelEl,input);
+		}
+		section.querySelector('input[type=file]').onchange=async event=>{
+			const file=event.target.files?.[0]; if(!file) return;
+			const revision=++this.faceRevision; this.faceBusy=true; this.status('Loading local photo…');
+			try {
+				const source=await decodeFacePhoto(file); if(revision!==this.faceRevision || !this.dialog.open) return;
+				this.faceSource=source; this.faceOptions={x:0,y:0,zoom:1,rotation:0};
+				for(const input of section.querySelectorAll('[data-face-control]')) input.value=this.faceOptions[input.dataset.faceControl];
+				this.faceDraft=encodeFacePhoto(source,this.faceOptions); this.faceChanged=true; this.status('Adjust the crop, then Save avatar to keep this photo in this browser.'); this.faceBusy=false; this.updateFacePreview();
+			} catch(error) { if(revision===this.faceRevision) this.status(error.message || 'Could not load this photo.'); }
+			finally { if(revision===this.faceRevision) this.faceBusy=false; event.target.value=''; }
+		};
+		section.querySelector('.face-remove').onclick=()=>{ this.faceRevision++; this.faceBusy=false; this.faceDraft=null; this.faceSource=null; this.faceChanged=true; this.updateFacePreview(); this.status('Photo removed from preview. Save avatar to keep this change.'); };
+		this.dialog.querySelector('.elsemesh-avatar-status').before(section);
+	}
+	updateFacePreview() {
+		const record=this.faceDraft;
+		this.faceSection.querySelector('.face-empty').textContent=record?'Square photo crop preview. The game view shows the actual character when the front camera is available.':'No local face photo.';
+		for(const input of this.faceSection.querySelectorAll('[data-face-control]')) input.disabled=!this.faceSource;
+		this.faceSection.querySelector('.face-remove').disabled=!record;
+		const revision=++this.faceRevision;
+		const ctx=this.faceCanvas.getContext('2d'); ctx.clearRect(0,0,256,256);
+		this.faceTask=(async()=>{
+			if(!record) {
+				try { await this.app?.avatar.setLocalFacePhoto?.(null); }
+				catch { if(revision===this.faceRevision) this.status('Could not update your character preview.'); }
+				return;
+			}
+			let image;
+			try {
+				image=await loadFacePhotoImage(record); if(revision!==this.faceRevision) return;
+				ctx.drawImage(image,0,0,256,256);
+				if(!this.faceSource && this.dialog.open) {
+					this.faceSource=document.createElement('canvas'); this.faceSource.width=this.faceSource.height=256;
+					this.faceSource.getContext('2d').drawImage(image,0,0);
+					for(const input of this.faceSection.querySelectorAll('[data-face-control]')) input.disabled=false;
+				}
+				await this.app?.avatar.setLocalFacePhoto?.({image,revision:String(revision)});
+			} catch { if(revision===this.faceRevision) this.status('Could not display this face photo. Choose another image.'); }
+			finally { image?.close?.(); }
+		})();
 	}
 	status(text) { this.dialog.querySelector('.elsemesh-avatar-status').textContent=text; }
 	refresh() {
@@ -77,6 +158,10 @@ export class AvatarChooser {
 		if(this.dialog.open || (this.app && (!this.app.input.enabled || !this.app.fly || !this.app.thirdIsland))) return;
 		this.draft={...this.value}; this.refresh(); this.status('');
 		this.nameInput.value=this.name;
+		this.faceOriginal=loadFacePhoto(); this.faceDraft=this.faceOriginal; this.faceSource=null; this.faceChanged=false; this.faceBusy=false;
+		this.faceOptions={x:0,y:0,zoom:1,rotation:0};
+		for(const input of this.faceSection.querySelectorAll('[data-face-control]')) input.value=this.faceOptions[input.dataset.faceControl];
+		this.updateFacePreview();
 		if(this.app) {
 			const a=this.app; this.previous={freeCam:a.freeCam,position:a.camera.position.clone(),yaw:a.fly.yaw,pitch:a.fly.pitch};
 			a.input.suspend(); document.exitPointerLock?.();
@@ -90,7 +175,9 @@ export class AvatarChooser {
 		this.dialog.showModal();
 	}
 	close(accepted) {
-		if(!accepted) this.app?.avatar.setAppearance(this.value)?.catch(()=>{});
+		if(this.saving && !accepted) { this.status('Finishing your save. Please wait.'); return; }
+		this.faceRevision++; this.faceBusy=false; this.faceSource=null;
+		if(!accepted) { this.app?.avatar.setAppearance(this.value)?.catch(()=>{}); this.faceDraft=this.faceOriginal; this.updateFacePreview(); }
 		this.dialog.close();
 		if(this.app) {
 			const a=this.app,p=this.previous; a.setFreeCam(p.freeCam);

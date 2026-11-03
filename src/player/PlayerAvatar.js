@@ -6,6 +6,8 @@ import { loadGLB } from '../engine/loaders/GLTF.js';
 import { SkinnedModel } from '../engine/render/Skinning.js';
 import { AVATAR_STYLES, DEFAULT_APPEARANCE, validateAppearance, appearanceKey } from './AvatarAppearance.js';
 import { avatarMaterialOptions, tintAvatar } from './AvatarMaterials.js';
+import {createLocalFacePhotoController} from './AvatarFacePhoto.js';
+import {nativeFaceTexture,bindNativeFaceTexture} from './AvatarFacePhotoMaterials.js';
 
 const characterSources = new Map();
 function characterSource(name) {
@@ -46,6 +48,7 @@ export class PlayerAvatar {
 		this.customizable = character === 'stock-player';
 		this.appearance = { ...DEFAULT_APPEARANCE };
 		this.loadVersion = 0;
+		this.localFacePhoto=createLocalFacePhotoController({getTarget:()=>this.scanned?{model:this.scanned,asset:this.loadedCharacterAsset}:null,loadSource:characterSource,createTexture:nativeFaceTexture,bindTexture:bindNativeFaceTexture});
 		this.scene = scene;
 		this.boat = boat;
 		this.group = new Group();
@@ -127,9 +130,13 @@ export class PlayerAvatar {
 		for (const material of model.materials) material.underwaterLighting = 'lite';
 		model.play('idle', { fade: .01 }); model.update(0);
 		if (this.customizable) tintAvatar(model,this.appearance);
+		this.localFacePhoto.detach();
 		if (this.scanned) { this.group.remove(this.scanned.group); this.scanned.dispose(); }
 		this.group.add(model.group); this.scanned = model;
+		this.loadedCharacterAsset=this.characterAsset;
+		this.localFacePhotoReady=this.localFacePhoto.refresh().catch(error=>{this.localFacePhotoError=error.message;return false;});
 	}
+	setLocalFacePhoto(value){return this.localFacePhoto.set(value);}
 
 	setAppearance(appearance = DEFAULT_APPEARANCE) {
 		if (!this.customizable || this.disposed) return this.ready;
@@ -145,6 +152,7 @@ export class PlayerAvatar {
 	}
 
 	dispose() {
+		this.localFacePhoto.dispose();
 		this.disposed = true; ++this.loadVersion;
 		this.group.parent?.remove(this.group); this.scanned?.dispose();
 		for (const part of this.proceduralParts) part.traverse(p => p.geometry?.dispose?.());

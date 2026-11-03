@@ -3,6 +3,8 @@ import {createAvatarTransportPresentation,createAvatarTransportMaterialAdapter,p
 import {T,BuiltinCharacterGLTFLoader} from './vendor/world-engine-contract.js';
 import {AVATAR_STYLES,DEFAULT_APPEARANCE,validateAppearance,appearanceKey} from '../player/AvatarAppearance.js';
 import {avatarLODSource,installAvatarGeometryLOD} from './AvatarGeometryLOD.js';
+import {createLocalFacePhotoController} from '../player/AvatarFacePhoto.js';
+import {webGLFaceTexture,bindWebGLFaceTexture} from '../player/AvatarFacePhotoMaterials.js';
 
 // Built-in, installed character assets only. Authored world assets retain their
 // separate static-only validation and cannot supply URLs, shaders or animation.
@@ -38,6 +40,7 @@ export class WebGLRepositoryAvatar{
   this.prepareResources=prepareResources;
   this.scene=scene;this.group=new T.Group();this.group.name='ElseMesh_builtin_animated_explorer';scene.add(this.group);
   this.appearance={...DEFAULT_APPEARANCE};this.version=0;this.disposed=false;this.cinematic=null;this.currentClip=null;this.materials=[];
+  this.localFacePhoto=createLocalFacePhotoController({getTarget:()=>this.model?{model:this.model,asset:this.asset}:null,loadSource:avatarLODSource,createTexture:atlas=>webGLFaceTexture(T,atlas),bindTexture:bindWebGLFaceTexture});
   this.transportPresentation=createAvatarTransportPresentation({root:this.group,isWebGL:true,materialAdapter:createAvatarTransportMaterialAdapter(()=>this.materials,{isWebGL:true})});
   this.ready=this.setAppearance(this.appearance);this.ready.catch(()=>{});
  }
@@ -64,15 +67,17 @@ export class WebGLRepositoryAvatar{
    // exposing it or replacing the current original avatar before readiness.
    if(this.prepareResources){const preparation=new T.Group();preparation.add(gltf.scene,this.transportPresentation.group.clone(true));try{await this.prepareResources(preparation);}finally{preparation.clear();}}
    if(this.disposed||version!==this.version){disposeScene(gltf.scene);return false;}
-   this.mixer?.stopAllAction();if(this.model){this.group.remove(this.model);this.mixer?.uncacheRoot(this.model);disposeScene(this.model);}
+   this.localFacePhoto.detach();this.mixer?.stopAllAction();if(this.model){this.group.remove(this.model);this.mixer?.uncacheRoot(this.model);disposeScene(this.model);}
    this.model=gltf.scene;this.asset=asset;this.materials=[...materials];this.group.add(this.model);this.mixer=new T.AnimationMixer(this.model);
    this.actions=new Map([...clips].map(([name,clip])=>[name,this.mixer.clipAction(clip)]));this.currentClip=null;this.play('idle');this.mixer.update(0);this.error=null;
+   this.localFacePhotoReady=this.localFacePhoto.refresh().catch(error=>{this.localFacePhotoError=error.message;return false;});
    const model=this.model,meshes=[];model.traverse(object=>{if(object.isMesh)meshes.push(object);});
    this.lodReady=avatarLODSource(asset).then(full=>installAvatarGeometryLOD({asset,full,root:model,meshes,engine:T,prepareResources:this.prepareResources?.bind(this),isCurrent:()=>!this.disposed&&this.model===model&&this.asset===asset})).then(lod=>{if(this.disposed||this.model!==model){lod?.dispose();return false;}if(lod)Object.defineProperty(model.userData,'avatarGeometryLOD',{value:lod,configurable:true});return !!lod;}).catch(error=>{if(this.model===model&&!this.disposed)this.lodError=error.message;return false;});
    return true;
   }catch(error){disposeScene(gltf.scene);throw error;}
  }
  observeVerifiedTransfer(record,worldId){return this.transportPresentation.observeVerifiedTransfer(record,worldId);}
+ setLocalFacePhoto(value){return this.localFacePhoto.set(value);}
  async prepareTransportResources(prepareResources=this.prepareResources){await this.ready;return prepareResources?.(this.group);}
  tint(){for(const material of this.materials)for(const [key,uniform]of Object.entries(material.userData.avatarUniforms??{}))uniform.value.set(this.appearance[key.slice(7)]);}
  play(name){
@@ -92,6 +97,6 @@ export class WebGLRepositoryAvatar{
   if(this.group.visible&&camera?.position&&!freeCam){this.group.updateMatrixWorld(true);this.group.visible=camera.position.distanceTo(this.group.localToWorld(new T.Vector3(0,1.58,0)))>=.45;}
  }
  dispose(){
-  if(this.disposed)return;this.transportPresentation.dispose();this.disposed=true;++this.version;this.mixer?.stopAllAction();if(this.model){this.mixer?.uncacheRoot(this.model);disposeScene(this.model);}this.group.removeFromParent();this.group.clear();this.materials=[];this.actions?.clear();
+  if(this.disposed)return;this.localFacePhoto.dispose();this.transportPresentation.dispose();this.disposed=true;++this.version;this.mixer?.stopAllAction();if(this.model){this.mixer?.uncacheRoot(this.model);disposeScene(this.model);}this.group.removeFromParent();this.group.clear();this.materials=[];this.actions?.clear();
  }
 }
