@@ -4,10 +4,10 @@ import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
 import {compileWebGLRepositoryPass} from '../src/world-runtime/WebGLRepositoryPrograms.js';
 
 function fixture(){
- const calls=[],savedTarget={},renderer={target:savedTarget,clippingPlanes:[],localClippingEnabled:false,autoClear:false,toneMapping:T.ACESFilmicToneMapping,xr:{enabled:true},viewport:new T.Vector4(2,3,300,200),scissor:new T.Vector4(4,5,100,80),scissorTest:true,color:new T.Color('red'),alpha:.4,
+ const calls=[],savedTarget={},program={program:{},isReady(){return this.ready;},ready:false},context={isContextLost:()=>false},renderer={info:{programs:[program]},domElement:new EventTarget(),getContext:()=>context,resolve:()=>program.ready=true,target:savedTarget,clippingPlanes:[],localClippingEnabled:false,autoClear:false,toneMapping:T.ACESFilmicToneMapping,xr:{enabled:true},viewport:new T.Vector4(2,3,300,200),scissor:new T.Vector4(4,5,100,80),scissorTest:true,color:new T.Color('red'),alpha:.4,
  getRenderTarget(){return this.target;},getViewport(v){return v.copy(this.viewport);},getScissor(v){return v.copy(this.scissor);},getScissorTest(){return this.scissorTest;},getClearColor(v){return v.copy(this.color);},getClearAlpha(){return this.alpha;},setRenderTarget(t){this.target=t;},setViewport(v){this.viewport.copy(v);},setScissor(v){this.scissor.copy(v);},setScissorTest(v){this.scissorTest=v;},setClearColor(v,a){this.color.copy(v);this.alpha=a;},
  render(scene){calls.push(['initialize',scene.children.length,this.target,this.clippingPlanes.length]);},
- compileAsync(root,camera,scene){calls.push(['compile',root,camera,scene,this.target,this.clippingPlanes.length,this.localClippingEnabled]);return new Promise(resolve=>this.resolve=resolve);}};
+ compile(root,camera,scene){calls.push(['compile',root,camera,scene,this.target,this.clippingPlanes.length,this.localClippingEnabled]);}};
  const root=new T.Group(),scene=new T.Scene(),camera=new T.PerspectiveCamera();root.add(new T.Mesh(new T.BoxGeometry(),new T.MeshStandardMaterial()));scene.fog=new T.FogExp2();return {renderer,calls,savedTarget,root,scene,camera};
 }
 test('program preparation compiles real pass parameters without rendering world content and restores before await',async()=>{
@@ -22,7 +22,24 @@ test('main signature compiles on the default framebuffer while clipping initiali
  const f=fixture(),pending=compileWebGLRepositoryPass({...f,targetScene:f.scene});assert.equal(f.calls[1][4],null);assert.equal(f.calls[1][5],0);assert.equal(f.calls[0][2].isWebGLRenderTarget,true);f.renderer.resolve();await pending;
 });
 test('synchronous compilation failure restores renderer state',()=>{
- const f=fixture();f.renderer.compileAsync=()=>{throw Error('compile failure');};assert.throws(()=>compileWebGLRepositoryPass({...f,targetScene:f.scene}),/compile failure/);assert.equal(f.renderer.target,f.savedTarget);assert.equal(f.renderer.xr.enabled,true);assert.equal(f.renderer.scissorTest,true);
+ const f=fixture();f.renderer.compile=()=>{throw Error('compile failure');};assert.throws(()=>compileWebGLRepositoryPass({...f,targetScene:f.scene}),/compile failure/);assert.equal(f.renderer.target,f.savedTarget);assert.equal(f.renderer.xr.enabled,true);assert.equal(f.renderer.scissorTest,true);
+});
+
+test('captures both transparent-face program handles without following mutable renderer lists',async()=>{
+ const f=fixture(),front=f.renderer.info.programs[0],back={program:{},ready:false,isReady(){return this.ready;}};front.ready=true;f.renderer.info.programs.push(back);
+ const pending=compileWebGLRepositoryPass({...f,targetScene:f.scene});let done=false;pending.then(()=>done=true);
+ f.renderer.info.programs=[];await new Promise(resolve=>setTimeout(resolve,15));assert.equal(done,false,'second captured face still compiling');back.ready=true;await pending;
+});
+test('abort and context retirement reject without releasing compiler and stop all readiness polling',async()=>{
+ for(const retire of [(f,c)=>c.abort(),f=>f.renderer.domElement.dispatchEvent(new Event('webglcontextlost')),f=>f.renderer.domElement.dispatchEvent(new Event('webglcontextrestored'))]){
+  const f=fixture(),controller=new AbortController(),program=f.renderer.info.programs[0];let queries=0;program.isReady=()=>{queries++;return false;};
+  const pending=compileWebGLRepositoryPass({...f,targetScene:f.scene,signal:controller.signal});retire(f,controller);await assert.rejects(pending,/context retired/);const atRetirement=queries;
+  program.isReady=()=>{throw Error('late destroyed-program poll');};await new Promise(resolve=>setTimeout(resolve,25));assert.equal(queries,atRetirement);assert.equal(f.renderer.target,f.savedTarget);
+ }
+});
+test('destroyed captured programs reject before readiness query and a stalled driver has a bounded deadline',async()=>{
+ const f=fixture(),program=f.renderer.info.programs[0],pending=compileWebGLRepositoryPass({...f,targetScene:f.scene});program.program=undefined;program.isReady=()=>{throw Error('destroyed program was queried');};await assert.rejects(pending,/program retired/);
+ const stalled=fixture();await assert.rejects(compileWebGLRepositoryPass({...stalled,targetScene:stalled.scene,timeoutMs:5}),/timed out/);
 });
 
 test('only the two pinned published world packages opt into first-trip preparation', async()=>{

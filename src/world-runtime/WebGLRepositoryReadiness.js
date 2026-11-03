@@ -1,7 +1,7 @@
 import {managedSparkTextureIdentity} from './SplatReadinessContract.js';
 import {T} from './vendor/world-engine-contract.js';
 import {compileWebGLRepositoryPass} from './WebGLRepositoryPrograms.js';
-import {withWebGLPortalRenderState} from './WebGLPortalViews.js';
+import {withWebGLPortalRenderState} from './WebGLRenderState.js';
 /** Each synchronous phase restores root ownership and renderer state before
  * waiting. The final resource draw includes children streamed during compilation. */
 export async function prepareWebGLRepositoryResources({renderer,camera,root,targetScene,signal}={}){
@@ -25,11 +25,11 @@ export async function prepareWebGLRepositoryResources({renderer,camera,root,targ
    finally{root.removeFromParent();if(parent){parent.add(root);const at=parent.children.indexOf(root);parent.children.splice(at,1);parent.children.splice(index,0,root);}for(const[n,visible,cull]of visibility){n.visible=visible;n.frustumCulled=cull;}renderer.presentationLODPreparing=oldLOD;}
   };
   if(actual){
-   await mutate(()=>compileWebGLRepositoryPass({renderer,camera,root:scene,targetScene:scene}));
-   await mutate(()=>compileWebGLRepositoryPass({renderer,camera,root:scene,targetScene:scene,target,clippingPlanes:planes}));
+   await mutate(()=>compileWebGLRepositoryPass({renderer,camera,root:scene,targetScene:scene,signal}));
+   await mutate(()=>compileWebGLRepositoryPass({renderer,camera,root:scene,targetScene:scene,target,clippingPlanes:planes,signal}));
    mutate(()=>withWebGLPortalRenderState(renderer,()=>{renderer.setRenderTarget(target);renderer.clippingPlanes=planes;renderer.localClippingEnabled=true;renderer.autoClear=true;renderer.setScissorTest(false);if(renderer.xr)renderer.xr.enabled=false;renderer.render(scene,camera);}));
   }else{
-   let wait;mutate(()=>{const oldTarget=renderer.getRenderTarget(),oldPlanes=renderer.clippingPlanes,oldAuto=renderer.autoClear;try{renderer.setRenderTarget(target);renderer.autoClear=true;renderer.clippingPlanes=[];renderer.render(scene,camera);renderer.clippingPlanes=planes;renderer.render(scene,camera);wait=renderer.compileAsync(scene,camera,targetScene);}finally{renderer.clippingPlanes=oldPlanes;renderer.autoClear=oldAuto;renderer.setRenderTarget(oldTarget);}});await wait;
+   let wait;mutate(()=>{const oldTarget=renderer.getRenderTarget(),oldPlanes=renderer.clippingPlanes,oldAuto=renderer.autoClear;try{renderer.setRenderTarget(target);renderer.autoClear=true;renderer.clippingPlanes=[];renderer.render(scene,camera);renderer.clippingPlanes=planes;renderer.render(scene,camera);wait=compileWebGLRepositoryPass({renderer,camera,root:scene,targetScene:targetScene??scene,signal,initializeClipping:false});}finally{renderer.clippingPlanes=oldPlanes;renderer.autoClear=oldAuto;renderer.setRenderTarget(oldTarget);}});await wait;
   }
   assertLive();return {ready:true};
  }finally{target?.dispose();scene?.clear();for(const event of events)renderer.domElement?.removeEventListener?.(event,onContextChange);}

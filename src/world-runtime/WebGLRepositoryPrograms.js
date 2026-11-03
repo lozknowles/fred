@@ -1,7 +1,7 @@
 import {T} from './vendor/world-engine-contract.js';
 import {isQualifiedWarehousePlantOcclusion} from './WebGLOpaqueDepthPrepass.js';
 import {SHIFT_WORLD_ID, SHIFT_CONTENT_DIGEST} from './ShiftingWorldProfile.js';
-import {withWebGLPortalRenderState} from './WebGLPortalViews.js';
+import {withWebGLPortalRenderState} from './WebGLRenderState.js';
 
 export function isQualifiedFirstTripPackage(kind,identity){
  return kind==='published' && (isQualifiedWarehousePlantOcclusion(identity) ||
@@ -9,26 +9,50 @@ export function isQualifiedFirstTripPackage(kind,identity){
 }
 
 /** Start compilation in the real pass signature without drawing repository
- * content. Three's compileAsync does not initialize its private clipping state;
+ * content. Three's compile does not initialize its private clipping state;
  * an empty offscreen draw does, without linking any repository shaders. All
  * public render state is restored before returning the pending promise.
  *
- * Callers must await each pass before starting another pass on these materials:
- * Three 0.180 polls material.currentProgram rather than a captured program.
+ * Capture the submitted Three 0.180 program wrappers, including both transparent
+ * faces. Their isReady only queries KHR completion; unlike compileAsync, no
+ * unmanaged timer follows mutable material properties after resource retirement.
+ * Without KHR, Three reports ready immediately (the legacy synchronous fallback).
  * root ownership/visibility is the caller's synchronous responsibility.
  */
-export function compileWebGLRepositoryPass({renderer,camera,root,targetScene,target=null,clippingPlanes=[]}={}){
- if(!renderer?.compileAsync||!root||!targetScene||!camera)throw Error('Repository program preparation dependencies required');
- const initializationTarget=new T.WebGLRenderTarget(1,1),empty=new T.Scene();let pending;
+export function compileWebGLRepositoryPass({renderer,camera,root,targetScene,target=null,clippingPlanes=[],signal,timeoutMs=30000,initializeClipping=true}={}){
+ if(!renderer?.compile||!root||!targetScene||!camera)throw Error('Repository program preparation dependencies required');
+ const context=renderer.getContext?.(),canvas=renderer.domElement,events=['webglcontextlost','webglcontextrestored'];let changed=false,timer,settled=false,rejectWait;
+ const retired=()=>Error('WebGL renderer context retired during repository preparation');
+ const assertLive=()=>{if(signal?.aborted||changed||renderer.getContext?.()!==context||context?.isContextLost?.())throw retired();};
+ const cleanup=()=>{clearTimeout(timer);for(const event of events)canvas?.removeEventListener?.(event,onRetire);signal?.removeEventListener('abort',onRetire);};
+ const onRetire=()=>{changed=true;if(rejectWait&&!settled){settled=true;cleanup();rejectWait(retired());}};
+ for(const event of events)canvas?.addEventListener?.(event,onRetire);signal?.addEventListener('abort',onRetire,{once:true});
+ const initializationTarget=initializeClipping?new T.WebGLRenderTarget(1,1):null,empty=new T.Scene();let programs;
+ const submit=()=>{renderer.compile(root,camera,targetScene);programs=[...(renderer.info?.programs??[])].map(wrapper=>({wrapper,handle:wrapper.program}));};
  try{
-  pending=withWebGLPortalRenderState(renderer,()=>{
+  assertLive();if(initializeClipping)withWebGLPortalRenderState(renderer,()=>{
    renderer.clippingPlanes=clippingPlanes;renderer.localClippingEnabled=clippingPlanes.length>0;
    renderer.autoClear=true;if(renderer.xr)renderer.xr.enabled=false;
    renderer.setRenderTarget(initializationTarget);renderer.setScissorTest(false);
    renderer.render(empty,camera);
    renderer.setRenderTarget(target);
-   return renderer.compileAsync(root,camera,targetScene);
-  });
- }finally{initializationTarget.dispose();}
- return pending;
+   submit();
+  });else submit(); // Legacy caller has already initialized and scoped render state.
+  assertLive();
+ }catch(error){cleanup();throw error;}finally{initializationTarget?.dispose();}
+ return new Promise((resolve,reject)=>{
+  rejectWait=reject;const deadline=Date.now()+timeoutMs;
+  const poll=()=>{
+   if(settled)return;
+   try{
+    assertLive();if(Date.now()>=deadline)throw Error('WebGL repository program preparation timed out');
+    let ready=true;for(const {wrapper,handle}of programs){
+     if(!handle||wrapper.program!==handle)throw Error('WebGL repository program retired during preparation');
+     if(typeof wrapper.isReady!=='function')throw Error('Unsupported Three program readiness contract');
+     ready=wrapper.isReady()&&ready;
+    }
+    if(ready){settled=true;cleanup();resolve(root);}else timer=setTimeout(poll,10);
+   }catch(error){settled=true;cleanup();reject(error);}
+  };poll();
+ });
 }
