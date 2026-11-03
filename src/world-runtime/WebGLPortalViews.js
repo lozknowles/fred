@@ -7,20 +7,20 @@ export function portalTargetSize(width,height,maxLongEdge=512){const s=Math.min(
 export const portalMappingMatrix=(s,d)=>new T.Matrix4().fromArray(portalMappingElements(s,d));
 export function portalDestinationPlane(d,margin=.015){const n=new T.Vector3(Math.sin(d.yaw||0),0,Math.cos(d.yaw||0));return new T.Plane(n,-n.dot(new T.Vector3(...d.position))-margin);}
 const vertexShader=`varying vec2 apertureUv;void main(){apertureUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
-const fragmentShader=`uniform sampler2D portalView;uniform vec2 framebufferSize;uniform float portalState;uniform float portalTime;varying vec2 apertureUv;
+const fragmentShader=`uniform sampler2D portalView;uniform vec2 framebufferSize;uniform vec2 framebufferOrigin;uniform vec4 viewRect;uniform float portalState;uniform float portalTime;varying vec2 apertureUv;
 void main(){
  float stripe=step(.5,fract((apertureUv.x+apertureUv.y)*12.+portalTime*.25));
  vec3 color=vec3(.055,.065,.075);
  if(portalState>.5&&portalState<1.5)color=mix(vec3(.04,.09,.16),vec3(.08,.22,.32),stripe);
  if(portalState>1.5&&portalState<2.5)color=mix(vec3(.14,.025,.025),vec3(.33,.06,.04),stripe);
- if(portalState>2.5){vec3 image=texture2D(portalView,gl_FragCoord.xy/framebufferSize).rgb;color=image;if(portalState>3.5)color=mix(image*.4,vec3(.18,.12,.025),.35+stripe*.2);}
+ if(portalState>2.5){vec3 image=texture2D(portalView,((gl_FragCoord.xy-framebufferOrigin)/framebufferSize-viewRect.xy)/viewRect.zw).rgb;color=image;if(portalState>3.5)color=mix(image*.4,vec3(.18,.12,.025),.35+stripe*.2);}
  if(!gl_FrontFacing)color=vec3(.045,.045,.05);
  gl_FragColor=vec4(color,1.);
  #include <tonemapping_fragment>
  #include <colorspace_fragment>
 }`;
 /** Independent material; callers own and dispose it, never share uniforms. */
-export function createWebGLPortalMaterial(target){return new T.ShaderMaterial({vertexShader,fragmentShader,side:T.DoubleSide,uniforms:{portalView:{value:target.texture},framebufferSize:{value:new T.Vector2(1,1)},portalState:{value:0},portalTime:{value:0}}});}
+export function createWebGLPortalMaterial(target){return new T.ShaderMaterial({vertexShader,fragmentShader,side:T.DoubleSide,uniforms:{portalView:{value:target.texture},framebufferSize:{value:new T.Vector2(1,1)},framebufferOrigin:{value:new T.Vector2()},viewRect:{value:new T.Vector4(0,0,1,1)},portalState:{value:0},portalTime:{value:0}}});}
 /** All renderer changes are synchronous, including failure restoration. */
 export function withWebGLPortalRenderState(renderer,draw){
  const r=renderer,state={toneMapping:r.toneMapping,target:r.getRenderTarget(),cube:r.getActiveCubeFace?.()??0,mip:r.getActiveMipmapLevel?.()??0,viewport:r.getViewport(new T.Vector4()),scissor:r.getScissor(new T.Vector4()),scissorTest:r.getScissorTest(),clip:r.clippingPlanes,localClip:r.localClippingEnabled,autoClear:r.autoClear,clearColor:r.getClearColor(new T.Color()).clone(),clearAlpha:r.getClearAlpha(),xr:r.xr?.enabled};
@@ -48,6 +48,43 @@ export function portalApertureIntersectsFrustum(frustum,source){
 function apertureCorners(source){
  const center=new T.Vector3(...source.position),right=new T.Vector3(Math.cos(source.yaw||0),0,-Math.sin(source.yaw||0)).multiplyScalar((source.width||2)/2),up=new T.Vector3(0,(source.height||3)/2,0);
  return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([x,y])=>center.clone().addScaledVector(right,x).addScaledVector(up,y));
+}
+/** Clip before dividing by w: near/eye crossings must not explode the crop.
+ * Coordinates are relative to the physical source viewport, bottom-left origin.
+ * A two-pixel guard preserves filtering at aperture edges. */
+export function projectedPortalAperture(camera,source,width,height){
+ camera.updateMatrixWorld();
+ const matrix=new T.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+ let polygon=apertureCorners(source).map(p=>new T.Vector4(p.x,p.y,p.z,1).applyMatrix4(matrix));
+ if(!polygon.every(p=>p.toArray().every(Number.isFinite)))return null;
+ for(const distance of [p=>p.w+p.x,p=>p.w-p.x,p=>p.w+p.y,p=>p.w-p.y,p=>p.w+p.z,p=>p.w-p.z]){
+  const clipped=[];
+  for(let i=0;i<polygon.length;i++){
+   const a=polygon[i],b=polygon[(i+1)%polygon.length],da=distance(a),db=distance(b),tolerance=1e-10*Math.max(1,Math.abs(a.w),Math.abs(b.w)),insideA=da>=-tolerance,insideB=db>=-tolerance;
+   if(insideA)clipped.push(a);
+   if(insideA!==insideB)clipped.push(a.clone().lerp(b,Math.max(0,Math.min(1,da/(da-db)))));
+  }
+  polygon=clipped;if(!polygon.length)return null;
+ }
+ const points=polygon.filter(p=>p.w>1e-10).map(p=>[(p.x/p.w+1)/2,(p.y/p.w+1)/2]);
+ if(!points.length)return null;
+ const x=Math.max(0,Math.min(...points.map(p=>p[0]))-2/Math.max(1,width)),y=Math.max(0,Math.min(...points.map(p=>p[1]))-2/Math.max(1,height));
+ const right=Math.min(1,Math.max(...points.map(p=>p[0]))+2/Math.max(1,width)),top=Math.min(1,Math.max(...points.map(p=>p[1]))+2/Math.max(1,height));
+ return right>x&&top>y?new T.Vector4(x,y,right-x,top-y):null;
+}
+/** Stable 32-pixel allocation buckets; projection remains exact as sizes round. */
+export function portalApertureTargetSize(rect,width,height,maxLongEdge=512){
+ const cap=Math.min(1024,Math.max(256,maxLongEdge)),w=Math.max(1,rect.z*width),h=Math.max(1,rect.w*height),scale=Math.min(1,cap/Math.max(w,h));
+ const bucket=v=>Math.min(cap,Math.max(32,Math.ceil(v/32)*32));
+ return {width:bucket(w*scale),height:bucket(h*scale)};
+}
+export function applyPortalViewCrop(camera,rect){
+ if(!rect)return camera;
+ const crop=new T.Matrix4().set(1/rect.z,0,0,(1-2*rect.x-rect.z)/rect.z,0,1/rect.w,0,(1-2*rect.y-rect.w)/rect.w,0,0,1,0,0,0,0,1);
+ camera.projectionMatrix.premultiply(crop);camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();return camera;
+}
+function setPortalSample(material,rect,width,height,x=0,y=0){
+ material.uniforms.framebufferSize.value.set(width,height);material.uniforms.framebufferOrigin.value.set(x,y);material.uniforms.viewRect.value.copy(rect);
 }
 /** Clip the inner rectangle to the actual eye-to-opening pyramid, destination
  * half-space and camera frustum together. Independent bounding-plane tests can
@@ -86,13 +123,14 @@ export function drawWebGLPortal(options){
 function mapViewCamera(sourceCamera,cam,source,destination){
  sourceCamera.updateMatrixWorld();cam.matrixAutoUpdate=false;cam.matrix.multiplyMatrices(portalMappingMatrix(source,destination),sourceCamera.matrixWorld);cam.matrix.decompose(cam.position,cam.quaternion,cam.scale);cam.matrixWorldNeedsUpdate=true;cam.projectionMatrix.copy(sourceCamera.projectionMatrix);cam.projectionMatrixInverse.copy(sourceCamera.projectionMatrixInverse);cam.near=sourceCamera.near;cam.far=sourceCamera.far;cam.updateMatrixWorld(true);
 }
-function drawPortalView({renderer:r,sourceCamera,camera:cam,source,destination,scene,candidate,target,width,height,time=0,ordinaryToneMapping,visibleApertures=new Set()}){
+function drawPortalView({renderer:r,sourceCamera,camera:cam,source,destination,scene,candidate,target,width,height,time=0,ordinaryToneMapping,crop,visibleApertures=new Set()}){
  mapViewCamera(sourceCamera,cam,source,destination);
+ const splat=candidate.splatScene;if(splat)applyPortalObliqueProjection(cam,destination);applyPortalViewCrop(cam,crop);
  const hidden=[];scene.traverse(node=>{if((node.userData.portalAperture||node.material?.userData?.portalAperture)&&!visibleApertures.has(node)){hidden.push([node,node.visible]);node.visible=false;}});
  try{return withWebGLPortalRenderState(r,()=>{
   candidate.nativeIsland?.bindView(cam);candidate.root.userData.updateWebGL?.(time,cam);candidate.root.traverse(node=>{node.userData.updateNeon?.(time,candidate.descriptor?.project.environment?.timeOfDay??14);node.userData.updateTreeLOD?.(time,cam.position);});
   r.clippingPlanes=[portalDestinationPlane(destination)];r.localClippingEnabled=true;r.autoClear=true;if(r.xr)r.xr.enabled=false;r.setRenderTarget(target);
-  const splat=candidate.splatScene;if(splat){applyPortalObliqueProjection(cam,destination);r.toneMapping=splat.expectedToneMapping;}else r.toneMapping=ordinaryToneMapping;
+  r.toneMapping=splat?splat.expectedToneMapping:ordinaryToneMapping;
   const ratio=r.getPixelRatio?.()??1;r.setViewport(0,0,width/ratio,height/ratio);r.setScissorTest(false);r.render(scene,cam);return true;
  });}finally{for(const[node,visible]of hidden)node.visible=visible;}
 }
@@ -140,6 +178,9 @@ export class WebGLPortalViews{
  }
  render({width=1,height=1,time=0}={}){
   const r=this.renderer,m=this.mainCamera;this.visibilityFrame=(this.visibilityFrame??0)+1;this.nestedDraws=0;this.nestedTargets??=[];m.updateMatrixWorld();
+  // Main sampling must follow the actual framebuffer/physical viewport, not CSS.
+  const mainTarget=r.getRenderTarget(),buffer=mainTarget?.width?new T.Vector2(mainTarget.width,mainTarget.height):r.getDrawingBufferSize?.(new T.Vector2())??new T.Vector2(width,height);
+  const viewport=r.getCurrentViewport?.(new T.Vector4())??new T.Vector4(0,0,buffer.x,buffer.y);width=viewport.z;height=viewport.w;
   const frustum=new T.Frustum().setFromProjectionMatrix(new T.Matrix4().multiplyMatrices(m.projectionMatrix,m.matrixWorldInverse)),position=new T.Vector3().setFromMatrixPosition(m.matrixWorld);
   for(const e of this.entries.values()){
    this._status(e);e.material.uniforms.framebufferSize.value.set(width,height);e.material.uniforms.portalTime.value=time;
@@ -147,14 +188,15 @@ export class WebGLPortalViews{
    const normal=new T.Vector3(Math.sin(e.source.yaw||0),0,Math.cos(e.source.yaw||0));
    if(normal.dot(position.clone().sub(new T.Vector3(...e.source.position)))<=0)continue;
    if(!portalApertureIntersectsFrustum(frustum,e.source))continue;
-   const size=portalTargetSize(width,height,this.maxLongEdge);e.target.setSize(size.width,size.height);
+   const crop=projectedPortalAperture(m,e.source,width,height);if(!crop)continue;
+   const size=portalApertureTargetSize(crop,width,height,this.maxLongEdge);e.crop=crop;setPortalSample(e.material,crop,width,height,viewport.x,viewport.y);e.target.setSize(size.width,size.height);
    const toneMapped=!e.candidate.splatScene;if(e.material.toneMapped!==toneMapped){e.material.toneMapped=toneMapped;e.material.needsUpdate=true;}
    try{this._drawWithNested(e,size,time);e.hasImage=true;this._status(e,true);}
    catch(error){if(!e.candidate.splatScene)throw error;e.error=String(error?.message??error);e.state='unavailable';e.hasImage=false;this._status(e);}
   }
  }
  _drawWithNested(e,size,time){
-  const outer={renderer:this.renderer,sourceCamera:this.mainCamera,camera:e.camera,source:e.source,destination:e.destination,scene:e.scene,candidate:e.candidate,target:e.target,width:size.width,height:size.height,time,ordinaryToneMapping:this.ordinaryToneMapping};
+  const outer={renderer:this.renderer,sourceCamera:this.mainCamera,camera:e.camera,source:e.source,destination:e.destination,scene:e.scene,candidate:e.candidate,target:e.target,width:size.width,height:size.height,time,ordinaryToneMapping:this.ordinaryToneMapping,crop:e.crop};
   if(!this.resolveNestedDestination||this.nestedDraws>=this.maxViews)return drawWebGLPortal(outer);
   const project=candidateProject(e.candidate),portals=project?.portals;
   // Re-read authored routes each draw; a return-only destination cannot expose
@@ -163,7 +205,7 @@ export class WebGLPortalViews{
    const index=portals.findIndex(portal=>!portal||(portal.id!==e.destination.id&&portal.enabled&&portal.view?.enabled!==false));
    if(index<0)return drawWebGLPortal(outer);
   }
-  mapViewCamera(this.mainCamera,e.camera,e.source,e.destination);
+  mapViewCamera(this.mainCamera,e.camera,e.source,e.destination);applyPortalViewCrop(e.camera,e.crop);
   const visibleApertures=new Set(),restores=[],worldId=candidateWorldId(e.candidate);
   // A direct owner grant through another door does not authorize this viewpoint.
   try{
@@ -172,6 +214,7 @@ export class WebGLPortalViews{
     if(this.nestedDraws>=this.maxViews)break;
     const source=project?.portals?.find(p=>p.id===node.userData.portalId);
     if(source?.id===e.destination.id||!source?.enabled||source.view?.enabled===false||!webGLPortalInView(e.camera,source)||!portalApertureVisibleThrough(e.camera,e.destination,source))continue;
+    const nestedCrop=projectedPortalAperture(e.camera,source,size.width,size.height);if(!nestedCrop)continue;
     const [x,y,z]=source.position;
     if(Math.hypot(e.camera.position.x-x,e.camera.position.y-y,e.camera.position.z-z)>=(source.view?.maxDistance??30))continue;
     let detachRoot=null;
@@ -185,11 +228,11 @@ export class WebGLPortalViews{
     if(!scene)continue;
     const slot=this.nestedDraws++;let nested=this.nestedTargets[slot];
     if(!nested){const target=new T.WebGLRenderTarget(1,1,{depthBuffer:true,type:T.HalfFloatType});nested={target,material:createWebGLPortalMaterial(target),camera:new T.PerspectiveCamera()};this.nestedTargets[slot]=nested;}
-    const nestedWidth=Math.max(1,Math.ceil(size.width/2)),nestedHeight=Math.max(1,Math.ceil(size.height/2));
-    nested.target.setSize(nestedWidth,nestedHeight);nested.material.uniforms.framebufferSize.value.set(size.width,size.height);nested.material.uniforms.portalState.value=PORTAL_VIEW_STATES.live;
+    const nestedSize=portalApertureTargetSize(nestedCrop,size.width,size.height,this.maxLongEdge),nestedWidth=nestedSize.width,nestedHeight=nestedSize.height;
+    nested.target.setSize(nestedWidth,nestedHeight);setPortalSample(nested.material,nestedCrop,size.width,size.height);nested.material.uniforms.portalState.value=PORTAL_VIEW_STATES.live;
     if(nested.material.toneMapped!==!candidate.splatScene){nested.material.toneMapped=!candidate.splatScene;nested.material.needsUpdate=true;}
     // This pass hides every aperture, so cycles and render-target feedback stop.
-    drawPortalView({renderer:this.renderer,sourceCamera:e.camera,camera:nested.camera,source,destination,scene,candidate,target:nested.target,width:nestedWidth,height:nestedHeight,time,ordinaryToneMapping:this.ordinaryToneMapping});
+    drawPortalView({renderer:this.renderer,sourceCamera:e.camera,camera:nested.camera,source,destination,scene,candidate,target:nested.target,width:nestedWidth,height:nestedHeight,time,ordinaryToneMapping:this.ordinaryToneMapping,crop:nestedCrop});
     restores.push([node,node.material]);node.material=nested.material;visibleApertures.add(node);
     }catch(error){e.nestedError=String(error?.message??error);}
     finally{detachRoot?.removeFromParent();}
