@@ -9,6 +9,7 @@ import {readNeonShiftPublication} from '../tools/neon-shift-publication.mjs';
 import {TABLE_TENNIS_SPLAT_PROFILE,assertQualifiedSplatProfile} from '../src/world-runtime/SplatSceneProfiles.js';
 import {validatePublishedWorldCatalog} from '../src/world-runtime/PublishedWorldCatalog.js';
 import {patchOutputSurface,outputSurfaceManifestName,outputSurfaceTransformVersion} from '../tools/output-surface-transform.mjs';
+import {validateAvatarVoiceMedia,verifyAvatarVoiceDelivery} from '../tools/avatar-voice-publication.mjs';
 import {assertTextureTierCompatible,textureTierReferences} from '../src/world-runtime/RepositoryTextureTiers.js';
 const arg=process.env.PUBLIC_ROOM_PACKAGE??process.env.PUBLIC_SUNSET_PACKAGE;
 if(!arg)throw Error('PUBLIC_ROOM_PACKAGE (or legacy PUBLIC_SUNSET_PACKAGE) must identify the generated publication candidate');
@@ -64,7 +65,12 @@ test('publication validates every active application chunk and explicitly distin
   assert.match(name,/^assets\/[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_-]{8}\.(?:js|css)$/);assert.match(digest,/^[a-f0-9]{64}$/);
   const file=path.join(root,name),stat=await fs.lstat(file);assert.ok(stat.isFile()&&!stat.isSymbolicLink());assert.equal(sha(await fs.readFile(file)),digest,name);
  }
- assert.deepEqual((await fs.readdir(path.join(root,'assets'))).sort(),[...new Set([...Object.keys(assets.current),...Object.keys(assets.compatibility)])].map(name=>name.slice('assets/'.length)).sort(),'no undeclared active or historical application chunks');
+ const media=publication.applicationMedia;validateAvatarVoiceMedia(media);
+ if(assets.mode==='fresh-origin')assert.deepEqual(media.compatibility,{});
+ for(const [name,digest] of [...Object.entries(media.current),...Object.entries(media.compatibility)]){
+  const file=path.join(root,name),stat=await fs.lstat(file);assert.ok(stat.isFile()&&!stat.isSymbolicLink());assert.equal(verifyAvatarVoiceDelivery(name.slice(7),await fs.readFile(file)),digest);
+ }
+ assert.deepEqual((await fs.readdir(path.join(root,'assets'))).sort(),[...new Set([...Object.keys(assets.current),...Object.keys(assets.compatibility),...Object.keys(media.current),...Object.keys(media.compatibility)])].map(name=>name.slice('assets/'.length)).sort(),'no undeclared active or historical application chunks or delivery media');
  for(const entry of ['index.html','worlds.html']){
   const html=await fs.readFile(path.join(root,entry),'utf8');let refs=0;
   for(const [,name]of html.matchAll(/(?:src|href)="(?:\.\/)?(assets\/[^"?#]+\.(?:js|css))"/g)){assert.ok(Object.hasOwn(assets.current,name),'entry point refers to an active authenticated chunk: '+name);refs++;}

@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 const root=await realpath(dirname(fileURLToPath(import.meta.url)));
 const port=Number(process.env.ELSEMESH_PORT??18888);
 if(!Number.isSafeInteger(port)||port<1024||port>65535)throw Error('ELSEMESH_PORT must be a number from 1024 to 65535.');
-const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.glb':'model/gltf-binary','.bin':'application/octet-stream','.woff2':'font/woff2'};
+const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.glb':'model/gltf-binary','.bin':'application/octet-stream','.woff2':'font/woff2','.mp3':'audio/mpeg'};
 const server=createServer(async(req,res)=>{
  try{
   if(req.method!=='GET'&&req.method!=='HEAD'){res.writeHead(405);res.end();return;}

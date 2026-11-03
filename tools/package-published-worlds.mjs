@@ -6,6 +6,7 @@ import {DOCK_WORLD_ID,ROOM_WORLD_ID,DOCK_CONTENT_DIGEST,readDockPublication} fro
 import {SHIFT_WORLD_ID,SHIFT_CONTENT_DIGEST} from '../src/world-runtime/ShiftingWorldProfile.js';
 import {readNeonShiftPublication} from './neon-shift-publication.mjs';
 import {packageOutputSurfaceDerivative} from './output-surface-transform.mjs';
+import {AVATAR_VOICE_PUBLICATION_PINS,verifyAvatarVoiceDelivery,validateAvatarVoiceMedia} from './avatar-voice-publication.mjs';
 import {validatePublishedWorldCatalog} from '../src/world-runtime/PublishedWorldCatalog.js';
 import {TABLE_TENNIS_SPLAT_PROFILE,assertQualifiedSplatProfile} from '../src/world-runtime/SplatSceneProfiles.js';
 import {loadWorldSource,repositoryDigest} from '../src/world-runtime/vendor/world-engine-contract.js';
@@ -78,12 +79,19 @@ async function inspect(dir){const info=await fs.lstat(dir);if(info.isSymbolicLin
 // Keep bounded immutable asset names used by tabs opened before this release.
 const priorAssets=path.join(previous,'assets'),outputAssets=path.join(output,'assets');
 const applicationAssets={mode:mode==='--fresh-origin'?'fresh-origin':'compatible-update',current:{},compatibility:{}};
+const applicationMedia={schema:'fred.avatar-voice-media/1',current:{},compatibility:{}};
+const priorPublication=JSON.parse(await fs.readFile(path.join(previous,'publication.json'),'utf8'));
+validateAvatarVoiceMedia(priorPublication.applicationMedia,{required:false});
 // Record all active JS/CSS bytes independently of the historical compatibility
 // set. A fresh origin deliberately has an empty compatibility set, not an
 // exemption from validating the newly built application closure.
 const currentNames=(await fs.readdir(path.join(build,'assets'))).sort();
 if(currentNames.length>256)throw Error('Too many current application assets');
 for(const name of currentNames){
+ if(Object.hasOwn(AVATAR_VOICE_PUBLICATION_PINS,name)){
+  for(const directory of [path.join(build,'assets'),outputAssets]){const file=path.join(directory,name),info=await fs.lstat(file);if(!info.isFile()||info.isSymbolicLink()||info.size!==AVATAR_VOICE_PUBLICATION_PINS[name].bytes)throw Error('Invalid avatar voice delivery file');verifyAvatarVoiceDelivery(name,await fs.readFile(file));}
+  applicationMedia.current['assets/'+name]=AVATAR_VOICE_PUBLICATION_PINS[name].sha256;continue;
+ }
  if(!/^[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(name))throw Error('Unexpected current application asset');
  const from=path.join(build,'assets',name),info=await fs.lstat(from),target=path.join(outputAssets,name);
  if(!info.isFile()||info.isSymbolicLink()||info.size>8*1024*1024)throw Error('Invalid current application asset');
@@ -91,11 +99,20 @@ for(const name of currentNames){
  if(await repositoryDigest(new Uint8Array(await fs.readFile(target)))!==digest)throw Error('Current application asset not preserved');
  applicationAssets.current['assets/'+name]=digest;
 }
+validateAvatarVoiceMedia(applicationMedia);
 // A new origin has no existing visitors that could request historical chunks.
 // The prior editor, its licences and the world provenance are still preserved.
 const priorNames=mode==='--fresh-origin'?[]:await fs.readdir(priorAssets);if(priorNames.length>96)throw Error('Too many prior application assets');
+if(mode!=='--fresh-origin'&&priorPublication.applicationMedia)for(const relative of new Set([...Object.keys(priorPublication.applicationMedia.current),...Object.keys(priorPublication.applicationMedia.compatibility)]))if(!priorNames.includes(relative.slice(7)))throw Error('Missing prior avatar voice media');
 let retainedAssetBytes=0,retainedAssetCount=0;
 for(const name of priorNames){
+ if(Object.hasOwn(AVATAR_VOICE_PUBLICATION_PINS,name)){
+  const relative='assets/'+name,pin=AVATAR_VOICE_PUBLICATION_PINS[name];
+  if(priorPublication.applicationMedia?.current?.[relative]!==pin.sha256&&priorPublication.applicationMedia?.compatibility?.[relative]!==pin.sha256)throw Error('Undeclared prior avatar voice media');
+  const from=path.join(priorAssets,name),info=await fs.lstat(from);if(!info.isFile()||info.isSymbolicLink()||info.size!==pin.bytes)throw Error('Invalid prior avatar voice media');verifyAvatarVoiceDelivery(name,await fs.readFile(from));
+  const target=path.join(outputAssets,name),targetInfo=await fs.lstat(target);if(!targetInfo.isFile()||targetInfo.isSymbolicLink()||targetInfo.size!==pin.bytes)throw Error('Invalid retained avatar voice media');verifyAvatarVoiceDelivery(name,await fs.readFile(target));
+  applicationMedia.compatibility[relative]=pin.sha256;continue;
+ }
  if(name.includes('..')||!/^[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(name))throw Error('Unexpected prior application asset');
  const from=path.join(priorAssets,name),info=await fs.lstat(from);
  if(!info.isFile()||info.isSymbolicLink()||info.size>5*1024*1024)throw Error('Invalid prior application asset');
@@ -128,7 +145,6 @@ if(shift){
  const credits=await fs.readFile(path.join(output,'credits.html'),'utf8');
  await fs.writeFile(path.join(output,'credits.html'),credits.replace('</html>',`<section><h2>Neon Shift</h2><p>Original world and signs by DRG Software Solutions LLC. Tower geometry adapted from Kenney’s <a href="https://kenney.nl/assets/city-kit-commercial">City Kit (Commercial) 2.1</a>, released under CC0. <a href="${notice}">Asset licence</a> · <a href="${shift.bundlePath}ATTRIBUTION.md">World attribution</a> · <a href="${shift.bundlePath}LICENSE">World licence</a>.</p></section></html>`));
 }
-const priorPublication=JSON.parse(await fs.readFile(path.join(previous,'publication.json'),'utf8'));
 if(priorPublication.schema!=='elsemesh.publication/1')throw Error('Unsupported prior publication provenance');
 const preserved={};
 if(priorPublication.editorCommit!==undefined){if(!/^[a-f0-9]{40}$/.test(priorPublication.editorCommit))throw Error('Invalid prior editor commit');preserved.editorCommit=priorPublication.editorCommit;}
@@ -139,6 +155,6 @@ const sourceContract=await fs.readFile(new URL('../src/world-runtime/vendor/worl
 // Upstream contract provenance covers its unchanged source bytes only.
 // Record and preserve the build derivative separately, including final chunks.
 const outputSurfaceDerivative=await packageOutputSurfaceDerivative(build,output);
-await fs.writeFile(path.join(output,'publication.json'),JSON.stringify({schema:'elsemesh.publication/1',applicationAssets,outputSurfaceDerivative,...preserved,engineCommit,worldContract:{sourceNormalization:'UTF-8 LF',commit:contractProvenance.commit,bundleSha256:contractProvenance.bundleSha256,baseBundleSha256:contractProvenance.baseBundleSha256??contractProvenance.bundleSha256,downstreamPatches:contractProvenance.downstreamPatches??[]},worldRepositoryCommit:commit,openingWorldId:opening.worldId,worlds:catalog.worlds,routes:catalog.routes,...(dockPackage?{dock:{sourceCommit:'fbc9f7e352b03b18d96ad428742770f844fcfc0d',contentDigest:DOCK_CONTENT_DIGEST,bytes:dockPackage.total,files:dockPackage.files.size}}:{}),scene:{name:TABLE_TENNIS_SPLAT_PROFILE.name,count:TABLE_TENNIS_SPLAT_PROFILE.asset.count,assetSha256:loaded.project.splatScene.asset.sha256,physicsSha256:loaded.project.splatScene.physics.sha256,sourceManifestSha256:provenance.sourceManifestSha256,reviewSha256:provenance.reviewSha256,auditedOriginalBytes:originalBytes},previousPublicEditorPreserved:true},null,2)+'\n');
+await fs.writeFile(path.join(output,'publication.json'),JSON.stringify({schema:'elsemesh.publication/1',applicationAssets,applicationMedia,outputSurfaceDerivative,...preserved,engineCommit,worldContract:{sourceNormalization:'UTF-8 LF',commit:contractProvenance.commit,bundleSha256:contractProvenance.bundleSha256,baseBundleSha256:contractProvenance.baseBundleSha256??contractProvenance.bundleSha256,downstreamPatches:contractProvenance.downstreamPatches??[]},worldRepositoryCommit:commit,openingWorldId:opening.worldId,worlds:catalog.worlds,routes:catalog.routes,...(dockPackage?{dock:{sourceCommit:'fbc9f7e352b03b18d96ad428742770f844fcfc0d',contentDigest:DOCK_CONTENT_DIGEST,bytes:dockPackage.total,files:dockPackage.files.size}}:{}),scene:{name:TABLE_TENNIS_SPLAT_PROFILE.name,count:TABLE_TENNIS_SPLAT_PROFILE.asset.count,assetSha256:loaded.project.splatScene.asset.sha256,physicsSha256:loaded.project.splatScene.physics.sha256,sourceManifestSha256:provenance.sourceManifestSha256,reviewSha256:provenance.reviewSha256,auditedOriginalBytes:originalBytes},previousPublicEditorPreserved:true},null,2)+'\n');
 if(shiftPackage){const file=path.join(output,'publication.json'),publication=JSON.parse(await fs.readFile(file,'utf8'));publication.neonShift={contentDigest:SHIFT_CONTENT_DIGEST,intervalMs:60000,bytes:shiftPackage.total,files:shiftPackage.files.size,implementation:'engine-owned WebGL procedural visual pool; fixed authored collision and return anchor'};await fs.writeFile(file,JSON.stringify(publication,null,2)+'\n');}
 console.log(JSON.stringify({output,worldRepositoryCommit:commit,roomBytes:total,auditedOriginalBytes:originalBytes,originalSourcesBundled:false,worlds:catalog.worlds}));
