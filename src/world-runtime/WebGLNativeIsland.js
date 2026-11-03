@@ -80,7 +80,7 @@ function buildPlants(source,time,detail,materials,mainCamera){
    if(native!==original.geometry)native.dispose();original.geometry.dispose();
   }
  }
- let lastProof=null,lastCanopyProof=false,lastHadProof=false;const lastVP=new T.Matrix4(),lastRoot=new T.Matrix4(),identity=new T.Matrix4();
+ let lastProof=null,lastCanopyProof=false,lastHadProof=false;const lastVP=new T.Matrix4(),lastProjection=new T.Matrix4(),lastRoot=new T.Matrix4(),identity=new T.Matrix4();
  const direction=new T.Vector3(),frustum=new T.Frustum(),vp=new T.Matrix4(),sphere=new T.Sphere();
  return{root,setOccluders(value){occlusion.setOccluders(value);lastCamera=null;},setOcclusionEnabled(value){occlusion.setEnabled(value);lastCamera=null;},updateView(camera){
   camera.getWorldDirection(direction);camera.updateMatrixWorld();vp.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
@@ -88,11 +88,13 @@ function buildPlants(source,time,detail,materials,mainCamera){
   const canopyProof=materials.tree.userData.nativeWindStrength===1&&Math.abs(materials.tree.userData.nativeWindVector.length()-1)<1e-6,proofActive=occlusion.active&&canopyProof;
   if(lastCamera===camera&&lastCanopyProof===canopyProof&&lastRoot.equals(root.matrixWorld)){
    if(proofActive&&lastHadProof&&lastVP.equals(vp)&&lastProof===occlusion.signature)return;
-   // Ineligible/alternate views retain the original movement threshold. Only
-   // restoring an earlier rejected set forces a repack when proof disappears.
-   if(!proofActive&&!lastHadProof&&lastPos.distanceToSquared(camera.position)<16&&lastDirection.dot(direction)>.998)return;
+   // Portal crops can change the frustum while reusing the same camera. An
+   // alternate view may reuse only its complete unchanged view-projection.
+   // Main views keep their normal movement tolerance when projection is fixed.
+   const alternate=mainCamera&&camera!==mainCamera;
+   if(!proofActive&&!lastHadProof&&(alternate?lastVP.equals(vp):lastProjection.equals(camera.projectionMatrix)&&lastPos.distanceToSquared(camera.position)<16&&lastDirection.dot(direction)>.998))return;
   }
-  lastCamera=camera;lastPos.copy(camera.position);lastDirection.copy(direction);lastVP.copy(vp);lastRoot.copy(root.matrixWorld);lastProof=occlusion.signature;lastCanopyProof=canopyProof;lastHadProof=proofActive;
+  lastCamera=camera;lastPos.copy(camera.position);lastDirection.copy(direction);lastVP.copy(vp);lastProjection.copy(camera.projectionMatrix);lastRoot.copy(root.matrixWorld);lastProof=occlusion.signature;lastCanopyProof=canopyProof;lastHadProof=proofActive;
   frustum.setFromProjectionMatrix(vp);occlusion.resetCounters();displayed=0;
   const identityRoot=root.matrixWorld.equals(identity);
   for(const batch of batches){

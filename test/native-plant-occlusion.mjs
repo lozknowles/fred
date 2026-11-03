@@ -80,8 +80,26 @@ test('native instances restore immediately on toggle/portal/occluder removal, in
   const portal=camera.clone();native.bindView(portal);assert.equal(native.stats().plants.displayed,1);native.bindView(camera);assert.equal(native.stats().plants.displayed,0);
   let plant;root.traverse(n=>{if(n.userData.nativePlantSpecies==='trees'&&n.userData.nativePlantDistant&&n.count)plant=n;});
   native.bindView(portal);root.traverse(n=>{if(n.userData.nativePlantSpecies==='trees'&&n.userData.nativePlantDistant&&n.count)plant=n;});
-  const alternateVersion=plant.instanceMatrix.version;portal.position.x+=.01;native.bindView(portal);assert.equal(plant.instanceMatrix.version,alternateVersion,'alternate views keep the normal movement threshold');
+  const alternateVersion=plant.instanceMatrix.version;native.bindView(portal);assert.equal(plant.instanceMatrix.version,alternateVersion,'unchanged alternate view reuses its instances');portal.position.x+=.01;native.bindView(portal);assert.ok(plant.instanceMatrix.version>alternateVersion,'alternate view movement rebuilds its exact frustum');
   wall.material.transparent=true;native.bindView(camera);const ineligibleVersion=plant.instanceMatrix.version;camera.position.x+=.01;native.bindView(camera);assert.equal(plant.instanceMatrix.version,ineligibleVersion,'ineligible materials do not force exact repacking');wall.material.transparent=false;native.bindView(camera);
   const foreignScene=new T.Scene();foreignScene.add(wall);native.bindView(camera);assert.equal(native.stats().plants.displayed,1);root.add(wall);native.bindView(camera);assert.equal(native.stats().plants.displayed,0);wall.removeFromParent();native.bindView(camera);assert.equal(native.stats().plants.displayed,1);
+ }finally{native.dispose();}
+});
+
+test('reused portal camera rebuilds actual foliage instances for expanded and asymmetric crops, but reuses an identical view',async()=>{
+ const {root,camera}=fixture(),n=8,normal=new Uint8Array(n*n*4),splat=new Uint8Array(n*n*4);
+ const records=Object.fromEntries(['palms','trees','bananas','shrubs','youngPalms','ferns','monsteras','elephantEars','heliconias','strelitzias'].map(name=>[name,[]]));records.trees=[{x:0,y:0,z:-80,s:1,sy:1,yaw:0,seed:.1,H:12.5}];
+ const source={domain:{res:n,size:8,origin:-4},coarse:{res:n,heights:new Float32Array(n*n),normal,splat},grassMask:{res:n,data:normal},shore:{res:n,data:new Float32Array(n*n*4)},records,appearance:{swellDir:{x:0,y:-1}},ocean:{level:0,fft:{local:{windDirection:25}},shore:{period:9,amplitude:.34}},tiles:[],readTile:async()=>({})};
+ const texture=new T.Texture(),bark={map:texture,normalMap:texture,orm:texture};
+ const native=await buildWebGLNativeIsland({project:{environment:{}},root,camera:camera.clone(),options:{mainCamera:camera,readNativeIsland:async()=>source,prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}})}});
+ try{
+  const portal=camera.clone();let foliage;root.traverse(n=>{if(n.userData.nativePlantSpecies==='trees'&&n.userData.nativePlantDistant)foliage=n;});
+  portal.setViewOffset(1000,1000,750,0,250,1000);native.bindView(portal);assert.equal(foliage.count,0,'rightmost quarter excludes the known source tree');
+  let version=foliage.instanceMatrix.version;native.bindView(portal);assert.equal(foliage.instanceMatrix.version,version,'identical cropped view does not repack');
+  portal.setViewOffset(1000,1000,200,0,800,1000);native.bindView(portal);assert.equal(foliage.count,1,'expanded asymmetric crop includes the source tree without moving the camera');assert.ok(foliage.instanceMatrix.version>version);
+  portal.setViewOffset(1000,1000,0,0,250,1000);native.bindView(portal);assert.equal(foliage.count,0,'shifted crop removes the tree');
+  portal.setViewOffset(1000,1000,350,0,600,1000);native.bindView(portal);assert.equal(foliage.count,1,'another asymmetric crop restores the source geometry');
+  version=foliage.instanceMatrix.version;native.bindView(portal);assert.equal(foliage.instanceMatrix.version,version);
+  assert.equal(native.stats().plants.occlusion.rejected,0,'alternate crop never uses main-view occlusion');
  }finally{native.dispose();}
 });
