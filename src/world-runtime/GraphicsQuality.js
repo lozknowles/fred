@@ -5,12 +5,13 @@ export const GRAPHICS_DEFAULTS = Object.freeze({
 export const GRAPHICS_PRESETS = Object.freeze({
  performance: Object.freeze({...GRAPHICS_DEFAULTS, maxOutputPixels: 500000, portalLongEdge: 256}),
  standard: GRAPHICS_DEFAULTS,
+ autoNative: Object.freeze({...GRAPHICS_DEFAULTS, mode: 'native30', maxOutputPixels: 3686400, minimumScale: .5}),
  capture: Object.freeze({...GRAPHICS_DEFAULTS, maxOutputPixels: 2100000, portalLongEdge: 1024})
 });
 
 const OPTIONS = Object.freeze({
- mode: ['manual', 'target30'],
- maxOutputPixels: [500000, 921600, 1000000, 1500000, 2073600, 2100000],
+ mode: ['manual', 'target30', 'native30'],
+ maxOutputPixels: [500000, 921600, 1000000, 1500000, 2073600, 2100000, 3686400],
  portalLongEdge: [256, 384, 512, 768, 1024],
  minimumScale: [.5, .7, .85]
 });
@@ -60,7 +61,8 @@ export class GraphicsQualityModel {
  constructor(preferences = GRAPHICS_DEFAULTS) {
   this.revision = 0;
   this.settings = validateGraphicsPreferences(preferences);
-  this.scale = 1;
+  this.nativePixels = Infinity;
+  this.scale = this._initialScale();
   this.portalScale = 1;
   this.effective = this._effective();
   this._resetPolicy();
@@ -68,10 +70,35 @@ export class GraphicsQualityModel {
 
  configure(preferences) {
   this.settings = validateGraphicsPreferences(preferences);
-  this.scale = this.portalScale = 1;
+  this.scale = this._initialScale();
+  this.portalScale = 1;
   this._publishEffective();
   this._resetPolicy();
   return this.snapshot();
+ }
+
+ _ceiling() {
+  return this.settings.mode === 'native30' ? Math.min(3686400, this.settings.maxOutputPixels, this.nativePixels) : this.settings.maxOutputPixels;
+ }
+
+ _initialScale() {
+  const ceiling = this._ceiling();
+  return this.settings.mode === 'native30' ? Math.sqrt(Math.min(1000000, ceiling) / ceiling) : 1;
+ }
+
+ // Device-pixel viewport changes invalidate trials, never grant an unmeasured upshift.
+ setViewport(width, height, dpr = 1) {
+  if (![width, height, dpr].every(value => Number.isFinite(value) && value > 0)) return;
+  const pixels = Math.max(1, Math.floor(width * height * dpr ** 2));
+  const signature = `${width}:${height}:${dpr}`;
+  if (!Number.isFinite(pixels) || this.viewportSignature === signature) return;
+  this.viewportSignature = signature;
+  const oldPixels = this.nativeTrial ? this._ceiling() * this.nativeTrial.before ** 2 : this.effective.maxOutputPixels;
+  this.nativePixels = pixels;
+  if (this.settings.mode !== 'native30') return;
+  this.scale = Math.min(1, Math.sqrt(oldPixels / this._ceiling()));
+  this._publishEffective();
+  this._resetPolicy();
  }
 
  _resetPolicy() {
@@ -82,6 +109,7 @@ export class GraphicsQualityModel {
   this.slowSince = this.fastSince = null;
   this.cooldownUntil = 0;
   this.probe = null;
+  this.nativeTrial = null;
   this.blocked = {portal: false, output: false};
   this.blockedReasons = {portal: null, output: null};
   this.decisions = [];
@@ -91,7 +119,7 @@ export class GraphicsQualityModel {
 
  _effective() {
   return {
-   maxOutputPixels: Math.min(this.settings.maxOutputPixels, Math.round(this.settings.maxOutputPixels * this.scale ** 2)),
+   maxOutputPixels: Math.min(this._ceiling(), Math.round(this._ceiling() * this.scale ** 2)),
    portalLongEdge: Math.max(256, Math.min(this.settings.portalLongEdge, Math.round(this.settings.portalLongEdge * this.portalScale))),
    scale: this.scale,
    portalScale: this.portalScale
@@ -126,6 +154,8 @@ export class GraphicsQualityModel {
  _breakClock(status) {
   // An interrupted probe has no stable comparison window: restore it, not accept it.
   if (this.probe) this._setScale(this.probe.kind, this.probe.before);
+  if (this.nativeTrial) this._setScale('output', this.nativeTrial.before);
+  this.nativeTrial = null;
   this.probe = null;
   this.previous = this.started = this.lastRefresh = null;
   this.slowSince = this.fastSince = null;
@@ -180,7 +210,61 @@ export class GraphicsQualityModel {
    this.status = 'Warming up';
    return;
   }
-  this._adapt(timestamp);
+  if (this.settings.mode === 'native30') this._adaptNative(timestamp);
+  else this._adapt(timestamp);
+ }
+
+ // At 32 FPS there is enough measured headroom for a small provisional step.
+ // All upshifts must then survive six seconds within the 30 FPS frame budget.
+ _adaptNative(at) {
+  const frameMs = 1000 / this.stats.fps, budget = 1000 / 30;
+  if (this.nativeTrial) {
+   const trial = this.nativeTrial;
+   this.status = 'Testing higher screen resolution';
+   if (at - trial.started < 1000) return;
+   const bad = frameMs > budget * 1.015 || this.stats.p95Ms > budget * 1.2;
+   trial.slowSince = bad ? (trial.slowSince ?? at) : null;
+   if (trial.slowSince !== null && at - trial.slowSince >= 1500) {
+    this._setScale('output', trial.before);
+    this._decision(at, 'native-trial-restored', {before: trial.before, candidate: trial.candidate});
+    this.nativeTrial = null;
+    this.cooldownUntil = at + 20000;
+    this.fastSince = this.slowSince = null;
+    this.status = 'Higher resolution exceeded the 30 FPS budget; restored';
+   } else if (at - trial.started >= 6000 && !bad) {
+    this._decision(at, 'native-trial-accepted', {candidate: trial.candidate});
+    this.nativeTrial = null;
+    this.cooldownUntil = at + 4000;
+    this.fastSince = this.slowSince = null;
+    this.status = 'Higher resolution stayed within the 30 FPS budget';
+   }
+   return;
+  }
+  if (at < this.cooldownUntil) { this.fastSince = this.slowSince = null; return; }
+  const floor = this._initialScale() * this.settings.minimumScale;
+  if (frameMs > budget * 1.03) {
+   this.fastSince = null;
+   this.slowSince ??= at;
+   this.status = 'Monitoring sustained slow frames';
+   if (at - this.slowSince >= 2500 && this.scale > floor) {
+    this._setScale('output', Math.max(floor, this.scale * .9));
+    this._decision(at, 'native-budget-reduced');
+    this.cooldownUntil = at + 6000;
+    this.slowSince = null;
+   } else if (this.scale <= floor) this.status = '30 FPS target not met at minimum quality';
+   return;
+  }
+  this.slowSince = null;
+  const headroom = frameMs <= budget * .95 && this.stats.p95Ms <= budget * 1.05;
+  this.fastSince = headroom ? (this.fastSince ?? at) : null;
+  this.status = this.scale >= 1 ? 'At device native resolution or selected pixel limit' : 'Monitoring headroom toward native resolution';
+  if (headroom && at - this.fastSince >= 8000 && this.scale < 1) {
+   const before = this.scale, candidate = Math.min(1, before * 1.05);
+   this.nativeTrial = {before, candidate, started: at, slowSince: null};
+   this._setScale('output', candidate);
+   this._decision(at, 'native-trial-started', {before, candidate});
+   this.fastSince = null;
+  }
  }
 
  _adapt(at) {
@@ -288,7 +372,7 @@ export class GraphicsQualityModel {
    effective: {...this.effective}, revision: this.revision,
    bufferedSamples: this.intervals.length,
    adaptation: {
-    targetFps: 30, probe: this.probe ? {...this.probe} : null,
+    targetFps: 30, nativeCeilingPixels: this._ceiling(), nativeTrial: this.nativeTrial ? {...this.nativeTrial} : null, probe: this.probe ? {...this.probe} : null,
     blocked: {...this.blocked}, blockedReasons: {...this.blockedReasons}, decisions: this.decisions.map(value => ({...value})),
     bufferLimit: BUFFER_LIMIT
    }

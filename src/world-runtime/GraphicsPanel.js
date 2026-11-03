@@ -14,7 +14,7 @@ export class GraphicsPanel {
   let preferences={...GRAPHICS_DEFAULTS};
   try{const saved=JSON.parse(this.storage?.getItem(STORAGE)??'null');if(saved?.version===1)preferences=validateGraphicsPreferences(saved.preferences);}catch{}
   if(captureQuality)preferences={...GRAPHICS_DEFAULTS,...GRAPHICS_PRESETS.capture};
-  this.model=new GraphicsQualityModel(preferences);this.experiments=new GraphicsExperiments(app);
+  this.model=new GraphicsQualityModel(preferences);this.updateViewport();this.experiments=new GraphicsExperiments(app);
   this.timeOfDay=null;this.build();this.apply();this.refresh();
   this.keydown=event=>{if(!isGameMenuShortcut(event,document.activeElement)||this.otherDialogOpen()||!this.open&&!this.canOpen())return;event.preventDefault();if(this.open)this.close();else this.show();};
   window.addEventListener('keydown',this.keydown);
@@ -40,12 +40,12 @@ export class GraphicsPanel {
    for(const [value,text]of options){const option=element('option',text);option.value=String(value);if(value==='custom')option.disabled=true;input.append(option);}
    const help=element('small',description);field.append(title,input,help);input.addEventListener('change',()=>onChange(input.value));this.form.append(field);this.controls[key]=input;return input;
   };
-  select('preset','Quality preset',[['performance','Performance'],['standard','Standard'],['capture','High detail'],['custom','Custom']],'Choose a starting point; individual controls remain available.',value=>this.setPreset(value));
-  select('mode','Frame-rate mode',[['manual','Manual quality'],['target30','Target 30 FPS']],'Adaptive mode tests resolution changes within your limits. It cannot guarantee 30 FPS.',value=>this.setPreferences({mode:value}));
-  select('maxOutputPixels','Screen resolution limit',[[500000,'Performance · 0.5 million pixels'],[921600,'720p limit · 1280 × 720 pixels'],[1000000,'Standard · 1 million pixels'],[1500000,'Detailed · 1.5 million pixels'],[2073600,'1080p limit · 1920 × 1080 pixels'],[2100000,'High · 2.1 million pixels']],'Maximum pixel count; keeps your screen’s shape. Actual resolution is shown above and may be lower with adaptive quality.',value=>this.setPreferences({maxOutputPixels:numeric(value)}));
+  select('preset','Quality preset',[['autoNative','Auto native · target 30 FPS'],['performance','Performance'],['standard','Standard'],['capture','High detail'],['custom','Custom']],'Choose a starting point; individual controls remain available.',value=>this.setPreset(value));
+  select('mode','Frame-rate mode',[['manual','Manual quality'],['target30','Target 30 FPS'],['native30','Auto native · target 30 FPS']],'Auto native starts near 1 million pixels and tests small increases toward your device’s native resolution when frame pacing allows. It cannot guarantee 30 FPS.',value=>this.setPreferences({mode:value}));
+  select('maxOutputPixels','Screen resolution limit',[[500000,'Performance · 0.5 million pixels'],[921600,'720p limit · 1280 × 720 pixels'],[1000000,'Standard · 1 million pixels'],[1500000,'Detailed · 1.5 million pixels'],[2073600,'1080p limit · 1920 × 1080 pixels'],[2100000,'High · 2.1 million pixels'],[3686400,'1440p limit · 2560 × 1440 pixels']],'Maximum pixel count; keeps your screen’s shape. Actual resolution is shown above and may be lower with adaptive quality.',value=>this.setPreferences({maxOutputPixels:numeric(value)}));
   select('timeOfDay','Current world time',[['world','World default'],[6,'Dawn · 06:00'],[9,'Morning · 09:00'],[12,'Noon · 12:00'],[15,'Afternoon · 15:00'],[18,'Dusk · 18:00'],[21,'Evening · 21:00'],[0,'Night · 00:00']],'Resets when you travel. Scanned rooms keep their captured lighting.',value=>{this.timeOfDay=value==='world'?null:numeric(value);this.refresh();});
   select('portalLongEdge','Portal detail',[[256,'Low · 256 pixels'],[384,'Medium · 384 pixels'],[512,'Standard · 512 pixels'],[768,'Detailed · 768 pixels'],[1024,'High · 1024 pixels']],'Maximum long edge of the portal image. Higher settings retain finer detail.',value=>this.setPreferences({portalLongEdge:numeric(value)}));
-  select('minimumScale','Adaptive quality floor',[[.85,'Preserve detail · 85%'],[.7,'Balanced · 70%'],[.5,'Maximum performance · 50%']],'Minimum linear resolution relative to your chosen detail limits. World geometry and effects stay intact.',value=>this.setPreferences({minimumScale:numeric(value)}));
+  select('minimumScale','Adaptive quality floor',[[.85,'Preserve detail · 85%'],[.7,'Balanced · 70%'],[.5,'Maximum performance · 50%']],'Minimum linear resolution relative to your chosen detail limits (or the starting screen budget in Auto native). World geometry and effects stay intact.',value=>this.setPreferences({minimumScale:numeric(value)}));
   const experiments=element('fieldset');experiments.className='graphics-experiments';experiments.append(element('legend','Rendering techniques'));
   const toggle=(key,label,help,action)=>{const row=element('label',null,'graphics-toggle'),input=element('input');input.type='checkbox';input.id='graphics-'+key;input.disabled=this.app.backend!=='webgl2';const copy=element('span',label);copy.append(element('small',help));row.append(input,copy);experiments.append(row);input.addEventListener('change',()=>{action(input.checked);this.model.configure(this.model.snapshot().settings);this.apply();this.refresh();});this.controls[key]=input;};
   toggle('prepass','Wall occlusion optimisation','Validated for the Warehouse walls. Enabled by default; switches off outside eligible scenes.',value=>this.experiments.setPrepass(value));
@@ -68,17 +68,19 @@ export class GraphicsPanel {
  save(){try{this.storage?.setItem(STORAGE,JSON.stringify({version:1,preferences:this.model.snapshot().settings}));this.storageNote.textContent=this.storage?'Quality preferences saved on this device. Experiments are session only.':'Preferences are temporary because local storage is unavailable.';}catch{this.storageNote.textContent='Preferences are temporary because local storage is unavailable.';}}
  setPreferences(patch){this.model.configure({...this.model.snapshot().settings,...patch});this.apply();this.save();this.refresh();return this.snapshot();}
  setPreset(name){if(!GRAPHICS_PRESETS[name])return this.snapshot();return this.setPreferences({...GRAPHICS_DEFAULTS,...GRAPHICS_PRESETS[name]});}
+ updateViewport(){this.model.setViewport(window.innerWidth,window.innerHeight,window.devicePixelRatio||1);}
  apply(){
   if(this.disposed||this.contextLost)return;const state=this.model.snapshot();if(state.revision===this.appliedRevision)return;
   const engine=this.app.engine,views=this.app.portals.views;
-  if(engine.maxOutputPixels!==state.effective.maxOutputPixels){engine.maxOutputPixels=state.effective.maxOutputPixels;engine.resize();this.app.post?.taau?.resetHistory();}
+  const native=state.settings.mode==='native30',sizingChanged=!!engine.nativeResolution!==native;engine.nativeResolution=native;
+  if(sizingChanged||engine.maxOutputPixels!==state.effective.maxOutputPixels){engine.maxOutputPixels=state.effective.maxOutputPixels;engine.resize();this.app.post?.taau?.resetHistory();}
   views.maxLongEdge=state.effective.portalLongEdge;
   // Forked preview views must inherit the current preference too.
   if(views.forkOptions)views.forkOptions.maxLongEdge=state.effective.portalLongEdge;
   this.appliedRevision=state.revision;
  }
  beforeFrame(timestamp,{eligible=true}={}){
-  if(this.disposed)return;this.experiments.refresh();this.model.observe(timestamp,{eligible:eligible&&!this.contextLost,visible:!document.hidden});this.apply();
+  if(this.disposed)return;this.experiments.refresh();this.updateViewport();this.model.observe(timestamp,{eligible:eligible&&!this.contextLost,visible:!document.hidden});this.apply();
   if(timestamp>=this.nextRefresh){this.nextRefresh=timestamp+500;this.refresh();}
  }
  environment(base){return gameMenuEnvironment(base,this.timeOfDay);}
@@ -94,8 +96,8 @@ export class GraphicsPanel {
   this.status.textContent=this.contextLost?'Graphics connection lost. Waiting for recovery.':state.status;
   for(const key of ['mode','maxOutputPixels','portalLongEdge','minimumScale'])this.controls[key].value=String(s[key]);
   this.controls.timeOfDay.value=this.timeOfDay===null?'world':String(this.timeOfDay);
-  this.controls.minimumScale.disabled=s.mode!=='target30';
-  const preset=Object.keys(GRAPHICS_PRESETS).find(name=>{const p=GRAPHICS_PRESETS[name];return s.maxOutputPixels===p.maxOutputPixels&&s.portalLongEdge===p.portalLongEdge;})??'custom';this.controls.preset.value=preset;if(this.legacy)this.legacy.value=preset==='capture'?'capture':'standard';
+  this.controls.minimumScale.disabled=s.mode==='manual';
+  const preset=Object.keys(GRAPHICS_PRESETS).find(name=>{const p=GRAPHICS_PRESETS[name];return Object.keys(p).every(key=>s[key]===p[key]);})??'custom';this.controls.preset.value=preset;if(this.legacy)this.legacy.value=preset==='capture'?'capture':'standard';
   this.controls.prepass.checked=state.experiments.prepass;this.controls.farTrees.checked=state.experiments.farTrees;
   const prepass=state.experiments;this.prepassStatus.textContent=!prepass.supported?'Wall optimisation is unavailable in this renderer.':!prepass.prepass?'Wall optimisation: off.':prepass.prepassUsed?'Wall optimisation: active.':prepass.prepassUsed===null?'Wall optimisation: enabled; waiting for a frame.':prepass.prepassReason==='no-eligible-occluders'?'Wall optimisation: enabled; unavailable in this scene.':'Wall optimisation: enabled; not used for this view.';
   this.experimentStatus.textContent=!state.experiments.supported?'These techniques are available in WebGL mode.':state.experiments.farTrees?`${state.experiments.changedTreeBatches} distant-tree batches changed. Restore defaults to return to the validated order.`:'Experimental draw ordering is off. Sorting and readback behaviour are unchanged.';

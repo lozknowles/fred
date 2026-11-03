@@ -252,3 +252,153 @@ test('a few multi-second intervals cannot confirm a quality reduction', () => {
  assert.equal(s.adaptation.decisions.some(d=>d.action==='probe-improved'),false);
  assert.ok(s.adaptation.decisions.some(d=>d.reason==='unstable'));
 });
+
+// Opt-in native mode: legacy manual/target30 contracts above remain unchanged.
+test('native preset is valid, opt-in, and begins at a conservative one-million-pixel budget', () => {
+ assert.equal(GRAPHICS_DEFAULTS.mode, 'manual');
+ assert.deepEqual(validateGraphicsPreferences(GRAPHICS_PRESETS.autoNative), GRAPHICS_PRESETS.autoNative);
+ const model = new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative);
+ model.setViewport(3840,2160,2);
+ assert.equal(model.snapshot().effective.maxOutputPixels,1000000);
+ assert.equal(model.snapshot().adaptation.nativeCeilingPixels,3686400);
+ const saved=JSON.parse(JSON.stringify({version:1,preferences:GRAPHICS_PRESETS.capture}));
+ assert.deepEqual(validateGraphicsPreferences(saved.preferences),GRAPHICS_PRESETS.capture);
+ assert.deepEqual(validateGraphicsPreferences(JSON.parse(JSON.stringify(GRAPHICS_PRESETS.autoNative))),GRAPHICS_PRESETS.autoNative);
+});
+
+test('native mode probes upward at 32 FPS only after sustained headroom, accepts within budget', () => {
+ const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+ model.setViewport(2560,1440,1);
+ c.run(10000,1000/32);
+ assert.equal(model.snapshot().effective.maxOutputPixels,1000000);
+ c.run(2000,1000/32);
+ assert.equal(model.snapshot().effective.maxOutputPixels,1102500);
+ assert.ok(model.snapshot().adaptation.nativeTrial);
+ c.run(7000,1000/32);
+ assert.ok(model.snapshot().adaptation.decisions.some(d=>d.action==='native-trial-accepted'));
+ assert.equal(model.snapshot().adaptation.nativeTrial,null);
+});
+
+test('native mode rolls back an unacceptable upshift and backs off retrying', () => {
+ const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+ model.setViewport(2560,1440,1);
+ c.run(12000,1000/32);
+ assert.ok(model.snapshot().adaptation.nativeTrial);
+ c.run(8000,40);
+ assert.equal(model.snapshot().effective.maxOutputPixels,1000000);
+ assert.ok(model.snapshot().adaptation.decisions.some(d=>d.action==='native-trial-restored'));
+ c.run(12000,1000/32);
+ assert.equal(model.snapshot().effective.maxOutputPixels,1000000);
+ assert.equal(model.snapshot().adaptation.nativeTrial,null);
+});
+
+test('exact 30 FPS and recurring stalls never justify a native upshift', () => {
+ for(const interval of [1000/30]){
+  const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+  model.setViewport(2560,1440,1);
+  c.run(50000,interval);
+  assert.equal(model.snapshot().effective.maxOutputPixels,1000000);
+  assert.equal(model.snapshot().adaptation.decisions.some(d=>d.action==='native-trial-started'),false);
+ }
+ const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+ model.setViewport(2560,1440,1);
+ for(let i=0;i<20;i++){c.run(1000,1000/32);c.tick(500);}
+ assert.equal(model.snapshot().adaptation.decisions.some(d=>d.action==='native-trial-started'),false);
+ assert.ok(model.snapshot().p99Ms>=500);
+});
+
+test('native slow frames reduce a bounded screen budget and disclose floor exhaustion', () => {
+ const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+ model.setViewport(2560,1440,1);
+ c.run(180000,50);
+ const s=model.snapshot();
+ assert.equal(s.effective.maxOutputPixels,250000);
+ assert.equal(s.status,'30 FPS target not met at minimum quality');
+ assert.equal(s.effective.portalLongEdge,512);
+});
+
+test('native viewport and DPR changes reset provisional work without an unmeasured quality jump', () => {
+ const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+ model.setViewport(2560,1440,1);
+ c.run(12000,1000/32);
+ assert.ok(model.snapshot().adaptation.nativeTrial);
+ model.setViewport(1920,1080,2);
+ assert.equal(model.snapshot().effective.maxOutputPixels,1000000);
+ assert.equal(model.snapshot().adaptation.nativeTrial,null);
+ assert.equal(model.snapshot().fps,null);
+ model.setViewport(640,360,1);
+ assert.equal(model.snapshot().effective.maxOutputPixels,640*360);
+ model.setViewport(2560,1440,2);
+ assert.equal(model.snapshot().effective.maxOutputPixels,640*360);
+ c.run(1000,1000/32);
+ assert.equal(model.snapshot().effective.maxOutputPixels,640*360);
+});
+
+test('native interrupted trials restore prior budget, and high headroom stops at actual native ceiling', () => {
+ for(const options of [{visible:false},{eligible:false}]){
+  const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+  model.setViewport(1280,720,2);
+  c.run(12000,1000/32);
+  c.tick(31.25,options);
+  assert.equal(model.snapshot().effective.maxOutputPixels,1000000);
+  assert.equal(model.snapshot().adaptation.nativeTrial,null);
+ }
+ const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+ model.setViewport(1280,720,1);
+ c.run(60000,16);
+ assert.equal(model.snapshot().effective.maxOutputPixels,921600);
+ assert.equal(model.snapshot().effective.scale,1);
+});
+
+test('native high-headroom steps reach but never exceed the 1440p pixel ceiling', () => {
+ const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+ model.setViewport(3840,2160,2);
+ c.run(400000,20);
+ assert.equal(model.snapshot().effective.maxOutputPixels,3686400);
+ assert.equal(model.snapshot().effective.scale,1);
+ assert.equal(model.snapshot().adaptation.nativeTrial,null);
+ const before=model.snapshot();
+ for(const viewport of [[0,0,1],[-1,300,1],[800,600,NaN],[800,600,0]])model.setViewport(...viewport);
+ assert.deepEqual(model.snapshot(),before);
+});
+
+import {outputPixelRatio} from '../src/engine/OutputResolution.js';
+import {Engine} from '../src/engine/Engine.js';
+
+test('native sizing opts into device DPR while preserving both legacy backend limits', () => {
+ const viewport={width:800,height:450,devicePixelRatio:3,maxOutputPixels:3686400};
+ assert.equal(outputPixelRatio({...viewport,legacyLimit:1}),1);
+ assert.equal(outputPixelRatio({...viewport,legacyLimit:1.5}),1.5);
+ assert.equal(outputPixelRatio({...viewport,nativeResolution:true}),3);
+ assert.equal(outputPixelRatio({...viewport,devicePixelRatio:1,nativeResolution:true}),1);
+ for(const [width,height,dpr] of [[3840,2160,2],[1920,1080,2],[800,450,3],[2560,1440,1],[800,1200,2]]){
+  const ratio=outputPixelRatio({width,height,devicePixelRatio:dpr,nativeResolution:true,maxOutputPixels:Infinity});
+  assert.ok(ratio<=dpr);
+  assert.ok(Math.floor(width*ratio)*Math.floor(height*ratio)<=3686400);
+ }
+});
+
+test('real WebGPU resize path changes drawing buffer as measured native trials change budget', () => {
+ const oldWindow=globalThis.window;
+ globalThis.window={innerWidth:2560,innerHeight:1440,devicePixelRatio:1};
+ try{
+  const engine=new Engine({});
+  engine.canvas={style:{}};engine.camera={updateProjectionMatrix(){}};engine.nativeResolution=true;
+  const model=new GraphicsQualityModel(GRAPHICS_PRESETS.autoNative),c=clock(model);
+  model.setViewport(2560,1440,1);
+  const resize=()=>{engine.maxOutputPixels=model.snapshot().effective.maxOutputPixels;engine.resize();return [engine.width,engine.height];};
+  assert.deepEqual(resize(),[1333,750]);
+  c.run(12000,1000/32);
+  assert.deepEqual(resize(),[1400,787]);
+  c.run(8000,40);
+  assert.deepEqual(resize(),[1333,750]);
+  // A smaller device/window clamps immediately; increasing it waits for evidence.
+  window.innerWidth=640;window.innerHeight=360;model.setViewport(640,360,1);
+  assert.deepEqual(resize(),[640,360]);
+  window.innerWidth=2560;window.innerHeight=1440;model.setViewport(2560,1440,1);
+  assert.deepEqual(resize(),[640,360]);
+  engine.nativeResolution=false;engine.maxOutputPixels=2073600;
+  assert.deepEqual(resizeLegacy(engine),[1920,1080]);
+ }finally{globalThis.window=oldWindow;}
+ function resizeLegacy(engine){engine.maxOutputPixels=2073600;engine.resize();return [engine.width,engine.height];}
+});

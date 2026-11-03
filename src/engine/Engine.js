@@ -5,6 +5,7 @@ import { Timer } from './math/Timer.js';
 import { MeshRenderer } from './render/MeshRenderer.js';
 import { FrameUniforms } from './render/Frame.js';
 import { FrameTiming } from './FrameTiming.js';
+import { outputPixelRatio } from './OutputResolution.js';
 
 // Canvas, device, main camera / scene and the frame loop.
 export class Engine {
@@ -62,7 +63,7 @@ export class Engine {
 	resize() {
 
 		const w = window.innerWidth, h = window.innerHeight;
-		const dpr = Math.min(this.renderScale, Math.sqrt(this.maxOutputPixels / (w * h)));
+		const dpr = outputPixelRatio({width:w,height:h,devicePixelRatio:window.devicePixelRatio,maxOutputPixels:this.maxOutputPixels,nativeResolution:this.nativeResolution,legacyLimit:this.renderScale});
 		this.canvas.width = Math.max( 1, Math.floor( w * dpr ) );
 		this.canvas.height = Math.max( 1, Math.floor( h * dpr ) );
 		this.canvas.style.width = w + 'px';

@@ -5,6 +5,7 @@ import {repositoryProjectWaterHeight} from './RepositoryWater.js';
 import {T} from './vendor/world-engine-contract.js';
 import {WebGLRepositoryAvatar} from './WebGLRepositoryAvatar.js';
 import {installWebGLPresentationLOD} from '../engine/render/PresentationLOD.js';
+import {outputPixelRatio} from '../engine/OutputResolution.js';
 
 // Established Fred compatibility renderer, with repository content injected
 // through the validated host. Movement always uses the installed native Player.
@@ -17,7 +18,7 @@ export function createWebGLRepositoryEngine(container){
  installWebGLPresentationLOD(renderer);
  const camera=new T.PerspectiveCamera(62,1,.06,6000),scene=new T.Scene();
  const engine={canvas,domElement:canvas,camera,scene,renderer,backend:'webgl2',maxOutputPixels:1000000,frame:0,running:false,get width(){return canvas.width;},get height(){return canvas.height;},onResize:[]};
- const resize=()=>{const w=window.innerWidth,h=window.innerHeight,dpr=Math.min(window.devicePixelRatio||1,1.5,Math.sqrt(engine.maxOutputPixels/(w*h)));renderer.setPixelRatio(dpr);renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();for(const fn of engine.onResize)fn(w,h);};
+ const resize=()=>{const w=window.innerWidth,h=window.innerHeight,dpr=outputPixelRatio({width:w,height:h,devicePixelRatio:window.devicePixelRatio,maxOutputPixels:engine.maxOutputPixels,nativeResolution:engine.nativeResolution,legacyLimit:Math.min(window.devicePixelRatio||1,1.5)});renderer.setPixelRatio(dpr);renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();for(const fn of engine.onResize)fn(w,h);};
  engine.resize=resize;window.addEventListener('resize',resize);resize();
  engine.start=update=>{engine.stop();engine.running=true;let previous=0,start=0;const loop=now=>{if(!engine.running)return;start ||= now;const dt=previous?Math.max(0,Math.min(.05,(now-previous)/1000)):0;previous=now;if(!document.hidden){engine.frame++;update(dt,(now-start)/1000);}engine.raf=requestAnimationFrame(loop);};engine.raf=requestAnimationFrame(loop);};
  engine.stop=()=>{engine.running=false;cancelAnimationFrame(engine.raf);};
