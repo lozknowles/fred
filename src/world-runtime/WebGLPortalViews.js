@@ -90,7 +90,7 @@ function drawPortalView({renderer:r,sourceCamera,camera:cam,source,destination,s
  mapViewCamera(sourceCamera,cam,source,destination);
  const hidden=[];scene.traverse(node=>{if((node.userData.portalAperture||node.material?.userData?.portalAperture)&&!visibleApertures.has(node)){hidden.push([node,node.visible]);node.visible=false;}});
  try{return withWebGLPortalRenderState(r,()=>{
-  candidate.nativeIsland?.bindView(cam);candidate.root.userData.updateWebGL?.(time);candidate.root.traverse(node=>{node.userData.updateNeon?.(time,candidate.descriptor?.project.environment?.timeOfDay??14);node.userData.updateTreeLOD?.(time,cam.position);});
+  candidate.nativeIsland?.bindView(cam);candidate.root.userData.updateWebGL?.(time,cam);candidate.root.traverse(node=>{node.userData.updateNeon?.(time,candidate.descriptor?.project.environment?.timeOfDay??14);node.userData.updateTreeLOD?.(time,cam.position);});
   r.clippingPlanes=[portalDestinationPlane(destination)];r.localClippingEnabled=true;r.autoClear=true;if(r.xr)r.xr.enabled=false;r.setRenderTarget(target);
   const splat=candidate.splatScene;if(splat){applyPortalObliqueProjection(cam,destination);r.toneMapping=splat.expectedToneMapping;}else r.toneMapping=ordinaryToneMapping;
   const ratio=r.getPixelRatio?.()??1;r.setViewport(0,0,width/ratio,height/ratio);r.setScissorTest(false);r.render(scene,cam);return true;

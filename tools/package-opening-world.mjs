@@ -1,3 +1,4 @@
+import {collectVerifiedRepositoryTextureTiers} from '../src/world-runtime/RepositoryTextureTiers.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -31,6 +32,8 @@ const loaded=await loadWorldSource({kind:'local',label:'package candidate',read:
  return new Uint8Array(await fs.readFile(file));
 }},{expectedWorldId:config.worldId,expectedContentDigest:config.contentDigest});
 if(loaded.identity.worldId!==config.worldId||loaded.identity.contentDigest!==config.contentDigest)throw Error('World source failed identity validation.');
+// Verify complete tier binaries and their texture-only contract before packaging.
+const verifiedTierFiles=await collectVerifiedRepositoryTextureTiers(loaded.project,loaded.source.read);
 const track=spawnSync('git',['-C',world,'ls-files','-z'],{encoding:'buffer',maxBuffer:1024*1024});
 if(track.status!==0)throw Error('Cannot enumerate pinned world files.');
 const tracked=new Set(track.stdout.toString('utf8').split('\0').filter(Boolean));
@@ -61,7 +64,7 @@ await fs.mkdir(output);
 for(const name of buildFiles){const target=path.join(output,name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.cp(path.join(build,name),target,{recursive:true,force:false,errorOnExist:true});}
 for(const name of characterFiles){const target=path.join(output,'models/characters',name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(path.join(build,'models/characters',name),target);}
 const worldTarget=path.join(output,bundlePath);await fs.mkdir(worldTarget,{recursive:true});
-for(const relative of selected){const target=path.join(worldTarget,relative);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(path.join(world,relative),target);}
+for(const relative of selected){const target=path.join(worldTarget,relative);await fs.mkdir(path.dirname(target),{recursive:true});if(verifiedTierFiles.has(relative))await fs.writeFile(target,verifiedTierFiles.get(relative));else await fs.copyFile(path.join(world,relative),target);}
 const openingCredits=await fs.readFile(new URL('../public/opening-credits.html',import.meta.url),'utf8');
 await fs.writeFile(path.join(output,'credits.html'),openingCredits.replaceAll('worlds/loz-opening/',bundlePath));
 const notices=[['LICENSE','LICENSE'],['src/world-runtime/vendor/THREE-LICENSE.txt','licenses/THREE-LICENSE.txt'],['src/world-runtime/vendor/FONT-LICENSE.txt','licenses/FONT-LICENSE.txt'],['src/world-runtime/vendor/ESBUILD-LICENSE.txt','licenses/ESBUILD-LICENSE.txt'],['src/vendor/basic-m6502/LICENSE','licenses/BASIC-M6502-LICENSE.txt']];

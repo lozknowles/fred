@@ -10,12 +10,12 @@ export function hostedRepositorySource(input,options={}){
  if(!root.pathname.endsWith('/'))root.pathname+='/';
  const timeoutMs=options.timeoutMs??15000;if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1||timeoutMs>30000)throw Error('Repository timeout must be between 1 and 30000 ms.');
  const fetcher=options.fetch??globalThis.fetch;
- return {kind:'local',label:'hosted:'+root.pathname,read:async(path,maxBytes)=>{
+ const source={kind:'local',label:'hosted:'+root.pathname,read:async(path,maxBytes,requestOptions={})=>{
   if(!isRepositoryContentPath(path))throw Error('Repository content path is not allowed.');
   if(!Number.isSafeInteger(maxBytes)||maxBytes<1)throw Error('Repository byte limit is invalid.');
   const url=new URL(path,root).href,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);let reader;
   try{
-   const response=await fetcher(url,{signal:controller.signal,redirect:'error',credentials:'omit',referrerPolicy:'no-referrer',cache:path==='world.json'?'no-store':'default'});
+   const response=await fetcher(url,{signal:requestOptions.signal?AbortSignal.any([controller.signal,requestOptions.signal]):controller.signal,redirect:'error',credentials:'omit',referrerPolicy:'no-referrer',cache:path==='world.json'?'no-store':'default'});
    if(!response.ok||response.redirected||(response.url&&response.url!==url))throw Error('Hosted repository request failed or redirected ('+response.status+').');
    const length=response.headers.get('content-length');// Transfer length may be compressed; enforce the decoded byte budget below.
    if(length!==null&&!/^\d+$/.test(length))throw Error('Hosted repository response length is invalid.');
@@ -23,5 +23,5 @@ export function hostedRepositorySource(input,options={}){
    for(;;){const part=await reader.read();if(part.done)break;total+=part.value.byteLength;if(total>maxBytes)throw Error('Hosted repository stream exceeds its byte limit.');chunks.push(part.value);}
    const bytes=new Uint8Array(total);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;
   }finally{clearTimeout(timer);if(reader){try{await reader.cancel();}catch{}reader.releaseLock();}}
- }};
+ }};source.textureTierRead=source.read;return source;
 }

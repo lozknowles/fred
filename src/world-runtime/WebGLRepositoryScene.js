@@ -1,3 +1,4 @@
+import {createRepositoryTextureTiers} from './RepositoryTextureTiers.js';
 import {createSplatSceneAdapter} from './SplatSceneAdapter.js';
 import {buildMediaScreenHousing} from './MediaScreen.js';
 import {installRepositoryPrimitiveLOD} from './RepositoryPrimitiveLOD.js';
@@ -51,6 +52,7 @@ export function buildWebGLNeon(config){
 }
 export function disposeWebGLRepositoryScene(candidate){
  if(!candidate||candidate.disposed)return;candidate.disposed=true;
+ candidate.textureTiers?.dispose();
  candidate.disposeNeonInstances?.();
  candidate.disposeNeonInstances=null;
  candidate.splatScene?.dispose();
@@ -117,6 +119,7 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
  const project=descriptor.project,root=new T.Group(),candidate={root,descriptor,terrain:descriptor.terrain,colliders:new Colliders(),query:repositoryWaterQuery(project.water,project),assets:[],loadedAssets:new Set()};
  candidate.project=project;root.name='repository-world:'+descriptor.worldId;const time={value:0};root.userData.updateWebGL=t=>{time.value=t;};
  candidate.depthOccluders=[];
+ candidate.textureTiers=createRepositoryTextureTiers({read:options.loaded?.source?.textureTierRead,onLoaded:loaded=>candidate.loadedAssets.add(loaded)});
  try{
   if(project.splatScene){candidate.splatScene=await createSplatSceneAdapter(project,{...options.splatScene,camera});candidate.terrain=candidate.splatScene.terrain;candidate.colliders=candidate.splatScene.colliders;candidate.clearance=candidate.splatScene.clearance;candidate.query=repositoryWaterQuery(null,null);Object.defineProperty(candidate,'backendQualification',{enumerable:true,get:()=>candidate.splatScene.diagnostics()});root.add(candidate.splatScene.root);}
   for(const b of descriptor.boxes)candidate.colliders.addBox(new Vector3(...b.center),new Vector3(...b.half),0,{walkable:b.walkable,solid:b.solid,tag:b.id});
@@ -139,7 +142,8 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
   for(const object of allObjects.filter(o=>o.kind==='glb'&&effectiveObjectState(allObjects,o.id).visible)){const kind=screensByObject.get(object.id),key=object.assetId+JSON.stringify(object.materialOverrides??[])+(kind??'')+(object.landscapeChunk??'');if(!groups.has(key))groups.set(key,{objects:[],kind});groups.get(key).objects.push(object);}
   for(const {objects,kind}of groups.values()){
    const first=objects[0],asset=project.assets.find(a=>a.id===first.assetId);if(!asset)throw Error('Missing asset '+first.assetId);
-   let loaded=cache.get(asset.id);if(!loaded){const response=await fetch(asset.dataUrl);if(!response.ok)throw Error('Asset read failed');loaded=await inspectAndLoadAsset(await response.arrayBuffer());cache.set(asset.id,loaded);candidate.loadedAssets.add(loaded);}
+   let loaded=cache.get(asset.id);if(!loaded){const response=await fetch(asset.dataUrl);if(!response.ok)throw Error('Asset read failed');const bytes=new Uint8Array(await response.arrayBuffer());loaded=await inspectAndLoadAsset(bytes.buffer);loaded.textureTierBytes=bytes;cache.set(asset.id,loaded);candidate.loadedAssets.add(loaded);}
+   if(!kind)candidate.textureTiers.register(asset,loaded.textureTierBytes,loaded,objects.map(o=>matrices.get(o.id).elements.slice(12,15)));
    loaded.scene.updateMatrixWorld(true);const materialCache=new Map(),retro=kind?buildWebGLRetroMaterial(kind):null;let primitives=0;
    loaded.scene.traverse(child=>{
     if(!child.isMesh||!child.visible)return;
@@ -156,7 +160,7 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
   candidate.assetBatchCount=groups.size;if(!project.nativeIsland){candidate.forest=forest(project,matrices,time);root.add(candidate.forest);}
   const water=project.nativeIsland||project.splatScene?null:sea(project,time);if(water)root.add(water);
   for(const feature of project.features??[]){if(feature.visible===false)continue;for(const part of buildFeatureGeometry(feature,project)){const wet=['water','foam'].includes(part.semantic);root.add(new T.Mesh(part.geometry,standard(part.color,wet?{roughness:.22,transparent:true,opacity:.9,metalness:.1}:{})));}}
-  const landscape=buildRepositoryLandscape(project);root.add(landscape);candidate.landscape=landscape;candidate.landscapeCollisions=addLandscapeCollisions(project,candidate.colliders);const update=root.userData.updateWebGL;root.userData.updateWebGL=t=>{update(t);landscape.userData.updateLandscape(t);ambient.update(t);};
+  const landscape=buildRepositoryLandscape(project);root.add(landscape);candidate.landscape=landscape;candidate.landscapeCollisions=addLandscapeCollisions(project,candidate.colliders);const update=root.userData.updateWebGL;root.userData.updateWebGL=(t,viewCamera=camera)=>{update(t);landscape.userData.updateLandscape(t);ambient.update(t);candidate.textureTiers.update(viewCamera);};
   candidate.traffic=await buildRepositoryTraffic(project,candidate);
   root.updateMatrixWorld(true);return candidate;
  }catch(error){disposeWebGLRepositoryScene(candidate);throw error;}

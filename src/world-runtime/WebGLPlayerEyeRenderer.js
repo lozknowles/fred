@@ -52,7 +52,7 @@ export class WebGLPlayerEyeRenderer {
    }
    source=this.source(frame);if(!source)return false;
    const avatar=frame.avatar?.group;if(!avatar)return false;hidden.push([avatar,avatar.visible]);avatar.visible=false;
-   source.candidate.nativeIsland?.bindView(frame.camera);source.candidate.root.userData.updateWebGL?.(time);source.candidate.root.traverse(node=>{node.userData.updateNeon?.(time,source.project.environment?.timeOfDay??14);node.userData.updateTreeLOD?.(time,frame.camera.position);});
+   source.candidate.nativeIsland?.bindView(frame.camera);source.candidate.root.userData.updateWebGL?.(time,frame.camera);source.candidate.root.traverse(node=>{node.userData.updateNeon?.(time,source.project.environment?.timeOfDay??14);node.userData.updateTreeLOD?.(time,frame.camera.position);});
    if(!this.source(frame))return false;
    r.clippingPlanes=[];r.localClippingEnabled=false;r.autoClear=true;if(r.xr)r.xr.enabled=false;r.toneMapping=source.candidate.splatScene?.expectedToneMapping??this.ordinaryToneMapping;
    r.setRenderTarget(null);const ratio=r.getPixelRatio?.()??1;r.setViewport(0,0,width/ratio,height/ratio);r.setScissorTest(false);
