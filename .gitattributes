@@ -7,3 +7,13 @@
 *.zip binary
 
 *.sog binary
+worlds/dock/README.md text eol=lf
+worlds/dock/NOTICE text eol=crlf
+worlds/dock/ATTRIBUTION.md text eol=crlf
+worlds/dock/LICENSE text eol=crlf
+worlds/dock/models/port/CREDITS.md text eol=crlf
+worlds/dock/models/port/licensing/README.md text eol=crlf
+worlds/dock/models/port/licensing/licenses/MPL-2.0.txt text eol=crlf
+worlds/dock/models/port/licensing/licenses/CC-BY-4.0.txt text eol=crlf
+sources/warehouse-print/*.mjs text eol=lf
+sources/warehouse-print/README.md text eol=lf

@@ -1,0 +1,22 @@
+{
+  "original": "assets/2ebe9db069ecc4e37d7e4d8a46e721489f2412eef017f0408382d69d6762a71f.glb",
+  "nonImageSHA256": "e3e844ae45a621ce7db253a4903cc8966e56aee1c926a36b9d7245b094d45505",
+  "tiers": [
+    {
+      "label": "coarse",
+      "width": 32,
+      "height": 48,
+      "path": "assets/15522364853a4f2d5de927577b3ac9c8afcccb7033b7e327d47b3598f044a644.glb",
+      "sha256": "15522364853a4f2d5de927577b3ac9c8afcccb7033b7e327d47b3598f044a644",
+      "bytes": 4412
+    },
+    {
+      "label": "fine",
+      "width": 768,
+      "height": 1152,
+      "path": "assets/5965c0a70d98e38c44d6b7abb2f43e00b6d3c0cfcc7343eac92be8ac08f29934.glb",
+      "sha256": "5965c0a70d98e38c44d6b7abb2f43e00b6d3c0cfcc7343eac92be8ac08f29934",
+      "bytes": 565148
+    }
+  ]
+}

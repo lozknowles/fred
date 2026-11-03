@@ -1,0 +1,24 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {pathToFileURL} from 'node:url';
+const root=path.resolve(import.meta.dirname,'../..'),engine=path.resolve(process.argv[2]??path.join(root,'../post-review/engine'));
+const {loadWorldSource}=await import(pathToFileURL(path.join(engine,'src/world-runtime/vendor/world-engine-contract.js')));
+const {textureTierReferences,readVerifiedTextureTier}=await import(pathToFileURL(path.join(engine,'src/world-runtime/RepositoryTextureTiers.js')));
+const read=async p=>new Uint8Array(await fs.readFile(path.join(root,p)));
+const w=await loadWorldSource({kind:'local',label:'private fred textured Warehouse',read});
+const oldRoot=path.join(root,'../warehouse-post-source'),oldManifest=JSON.parse(await fs.readFile(path.join(oldRoot,'world.json'))),manifest=JSON.parse(await fs.readFile(path.join(root,'world.json')));
+const oldObjects=JSON.parse(await fs.readFile(path.join(oldRoot,oldManifest.components.objects.path))),objects=JSON.parse(await fs.readFile(path.join(root,manifest.components.objects.path)));
+assert.equal(objects.length,oldObjects.length);const changed=[];
+for(let i=0;i<objects.length;i++){if(JSON.stringify(objects[i])!==JSON.stringify(oldObjects[i]))changed.push(objects[i].id);const {assetId,color,...a}=objects[i],{assetId:oldAsset,color:oldColor,...b}=oldObjects[i];assert.deepEqual(a,b);}
+assert.deepEqual(changed,['warehouse:object:1338']);
+for(const role of Object.keys(manifest.components).filter(r=>!['objects','assets'].includes(r)))assert.equal(manifest.components[role].sha256,oldManifest.components[role].sha256);
+const oldAssets=JSON.parse(await fs.readFile(path.join(oldRoot,oldManifest.components.assets.path))),assets=JSON.parse(await fs.readFile(path.join(root,manifest.components.assets.path)));
+assert.deepEqual(assets.slice(0,oldAssets.length),oldAssets);assert.equal(assets.length,oldAssets.length+1);
+const asset=w.project.assets.find(a=>a.id==='warehouse:architectural-print-tiers'),external=assets.at(-1),refs=textureTierReferences(asset),coarse=await read(external.file.path);
+await readVerifiedTextureTier(read,refs[0],coarse);
+const original=await read('assets/2ebe9db069ecc4e37d7e4d8a46e721489f2412eef017f0408382d69d6762a71f.glb');
+const payload=b=>{const v=new DataView(b.buffer,b.byteOffset,b.byteLength);return b.slice(28+v.getUint32(12,true),28+v.getUint32(12,true)+912);};assert.deepEqual(payload(original),payload(coarse));
+const spawn=w.project.spawn.position,object=objects.find(o=>o.id===changed[0]);
+const report={contentDigest:w.identity.contentDigest,snapshot:manifest.snapshot,objects:objects.length,changedObjects:changed,unchangedObjectTransformsAndCollisions:true,unchangedOtherComponents:true,unchangedExistingAssets:oldAssets.length,originalNonImagePayloadBytes:912,verifiedTierRefs:refs,coarseBytes:coarse.length,spawn,objectPosition:object.position,acceptance:'CPU content/loader/tier compatibility verified; GPU rendering and device acceptance unverified'};
+await fs.writeFile(path.join(import.meta.dirname,'verification.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));

@@ -1,0 +1,32 @@
+{
+  "contentDigest": "78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b",
+  "snapshot": "bde9512c66afdb280ff1e0f9177a68d3d0655a474e35547626503db0ec72e191",
+  "objects": 1733,
+  "changedObjects": [
+    "warehouse:object:1338"
+  ],
+  "unchangedObjectTransformsAndCollisions": true,
+  "unchangedOtherComponents": true,
+  "unchangedExistingAssets": 65,
+  "originalNonImagePayloadBytes": 912,
+  "verifiedTierRefs": [
+    {
+      "path": "assets/5965c0a70d98e38c44d6b7abb2f43e00b6d3c0cfcc7343eac92be8ac08f29934.glb",
+      "sha256": "5965c0a70d98e38c44d6b7abb2f43e00b6d3c0cfcc7343eac92be8ac08f29934",
+      "bytes": 565148,
+      "distance": 8
+    }
+  ],
+  "coarseBytes": 4412,
+  "spawn": [
+    -4,
+    3,
+    -75
+  ],
+  "objectPosition": [
+    -13.4,
+    5.3,
+    -87.355
+  ],
+  "acceptance": "CPU content/loader/tier compatibility verified; GPU rendering and device acceptance unverified"
+}
