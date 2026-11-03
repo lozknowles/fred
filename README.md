@@ -22,7 +22,7 @@ WASD walks, mouse drag or arrow keys look, Shift runs, Space jumps, E uses nearb
 
 Fred holds reusable rendering, physics, player controls, networking, federation and supported behaviour code. The authored island is on the [warehouse-world branch](https://github.com/lozknowles/fred/tree/warehouse-world). Its [archived public snapshot](https://github.com/lozknowles/elsemesh-world-loz-opening-island) retains its own attribution. The complete release archive bundles that snapshot for fast, reliable first launch. The world ID, repository commit and content digest are pinned in `opening-world.json` inside the archive. Editing a world never requires changing engine source.
 
-The source code is in this repository. Run `npm ci && npm run dev` to work on the engine. The source configuration points to a pinned commit of the private world branch; the release archive instead bundles the same revision locally. For exact packaging and verification, see [public opening-world deployment](docs/public-opening-world.md).
+Use `npm ci && npm run dev` to develop the engine. To play the private Warehouse, build and package the pinned world from a local authenticated checkout as described above. The resulting package reads the world locally without a GitHub sign-in. For exact packaging and verification, see [public opening-world deployment](docs/public-opening-world.md).
 
 The engine still contains shared modules needed to bring earlier gameplay into permissioned worlds. Their presence in the source does not make the retired combined game a launchable download. Git history remains available for audit.
 

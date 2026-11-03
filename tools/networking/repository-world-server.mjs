@@ -62,10 +62,17 @@ export async function prepareRepositoryConfig(config,identity){
 // transient presentation expiry are sampled again on every following broadcast.
 export function broadcastRepositoryPresence(federation,peers){
  const messages=new Map();
- for(const [node,peer] of peers){const s=federation.members.get(node);if(s)for(const worldId of s.views){
-  if(!messages.has(worldId))messages.set(worldId,JSON.stringify({type:'presence',worldId,players:federation.presence(worldId)}));
-  sendBounded(peer,messages.get(worldId));
- }}
+ for(const [node,peer] of peers){
+  const member=federation.members.get(node);
+  if(!member)continue;
+  for(const worldId of member.views){
+   if(!messages.has(worldId)){
+    const players=federation.presence(worldId);
+    messages.set(worldId,JSON.stringify({type:'presence',worldId,players}));
+   }
+   sendBounded(peer,messages.get(worldId));
+  }
+ }
 }
 export async function createRepositoryWorldServer({root=resolve('dist'),config,identity,host='127.0.0.1',port=5201,publicOrigin=null,production=false}={}){
  const security=roomSecurity({host,publicOrigin,production});root=await realpath(root);config=await prepareRepositoryConfig(config,identity);const federation=new RepositoryFederation(config,identity),peers=new Map();

@@ -1,4 +1,5 @@
 import {collectNeonDiagnostics,FrameDiagnostics} from './FrameDiagnostics.js';
+import {updateRepositoryHud} from './RepositoryHud.js';
 import {walkingBlockMessage} from '../player/WalkingBlockReason.js';
 import './MobileControls.css';
 import {GraphicsPanel} from './GraphicsPanel.js';
@@ -261,8 +262,7 @@ async function init(){
    if(playerEyes?.controller.status().active&&!playerEyes.controls.maintain())playerEyes.ownView('Viewer session changed');
    let eyeActive=!!playerEyes?.controller.status().active,eyeFrame=eyeActive?playerEyes.controller.update():null;eyeActive=!!eyeFrame;
    const env=graphics.environment(host.environment()??{timeOfDay:14,cloudCoverage:.49,windSpeed:6,sunAzimuth:0});
-    const updatedActive=host.active;let frameNeons;
-    if(eyeActive||!app.freeCam)frameNeons=host.update(dt,time,{move:eyeActive||canMove,interact:!eyeActive&&canMove,environment:env,collectNeons:true,viewCamera:eyeFrame&&eyeFrame.target.worldId===host.active?.identity.worldId?eyeFrame.camera:engine.camera});
+    if(eyeActive||!app.freeCam)host.update(dt,time,{move:eyeActive||canMove,interact:!eyeActive&&canMove,environment:env,viewCamera:eyeFrame&&eyeFrame.target.worldId===host.active?.identity.worldId?eyeFrame.camera:engine.camera});
     if(canMove&&!eyeActive&&input.hit('KeyE')){const device=retro.nearest(engine.camera.position),tv=nearestMedia();if(device){const computer=host.active.project.objects.find(o=>o.id===device.objectId);if(computer)void openComputer(computer,host.active,device);else if(!ownerMode()){interactionContext=interactionState();retro.open(device);}else report('Access restricted');}else if(tv)void openMedia(tv,host.active);}
    if(host.active&&!app.freeCam)followCamera.update(dt,host.active,{suspended:eyeActive||playerEyes?.panel.open||terminal.open||retro.active||!!media?.controlsOpen||controlsHelp.open||accessPanel.root.open||portals.pending});
    if(host.active)avatar.update(dt,host.active.player,engine.camera,app.freeCam||followCamera.enabled||eyeActive);else avatar.group.visible=false;
@@ -282,17 +282,12 @@ async function init(){
    media.update();worldWelcome.tick();
    if(openingLoading&&pendingOpeningReady&&pendingOpeningReady===host.active){const activeOpeningFrame=host.active;openingProgress.advance('first-frame');pendingOpeningReady=null;openingLoading=false;requestAnimationFrame(()=>{if(host.active===activeOpeningFrame)hideOpeningSplash();});}
    const active=host.active;
-   let hudLabel='Open a repository to explore';
-   if(active){
-    const {position,mode}=active.player;
-    const interaction=retro.nearest(engine.camera.position)?' · E: use Commodore / retro computer':host.nearestComputer()?' · E: use computer':nearestMedia()?' · E: turn on or control TV (Play, then Return to game)':'';
-    hudLabel=`${active.project.metadata.name} · ${mode} · ${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}${interaction}`;
-    if(mode==='walk'&&canMove&&!eyeActive&&!app.freeCam){const blocked=walkingBlockMessage(active.player.walkingBlock,active.project);if(blocked)hudLabel+=' · '+blocked;}
-   }
-   if(hud.textContent!==hudLabel)hud.textContent=hudLabel;
+   const interaction=!active?'':retro.nearest(engine.camera.position)?' · E: use Commodore / retro computer':host.nearestComputer()?' · E: use computer':nearestMedia()?' · E: turn on or control TV (Play, then Return to game)':'';
+   const blocked=active?.player.mode==='walk'&&canMove&&!eyeActive&&!app.freeCam&&walkingBlockMessage(active.player.walkingBlock,active.project);
+   updateRepositoryHud(hud,active,interaction,blocked);
    // Preserve frame-local inputs and eye status sampling; debug-only readers run on demand.
    const eyeDiagnostics=playerEyes?.diagnostics()??null,diagnosticFrame=engine.frame;
-   frameDiagnostics.publish(()=> ({playerEyes:eyeDiagnostics,media:media.diagnostics(),mediaOcclusion:app.mediaOcclusion&&{complete:app.mediaOcclusion.complete,reasons:app.mediaOcclusion.reasons,stats:app.mediaOcclusion.stats},backend:selected.backend,fallbackReason:selected.fallbackReason,renderSize:[engine.canvas.width,engine.canvas.height],cameraView:followCamera.state,portalLongEdge:portals.views.maxLongEdge,frames:diagnosticFrame,worldId:active?.identity.worldId,contentDigest:active?.identity.contentDigest,position:active?.player.position.toArray(),mode:active?.player.mode,grounded:active?.player.grounded,boxes:active?.colliders.boxes.length,assets:active?.assets,weather:weatherState,environment:env,water:water??null,nativeIsland:nativeIslandDiagnostics(active,selected.backend),assetBatches:active?.assetBatchCount,portals:portals.diagnostics(),portalEffects:portalEffects.diagnostics(),portalMeld:publicMeld?.diagnostics()??null,avatar:{appearance:app.player.avatarAppearance??loadAppearance(),loaded:!!(avatar.scanned||avatar.model),model:avatar.characterAsset??avatar.asset??avatar.appearance?.style},retro:{active:retro.active,near:retro.nearest(engine.camera.position)?.kind},neons:frameNeons&&active===updatedActive?frameNeons:collectNeonDiagnostics(active)}));
+   frameDiagnostics.publish(()=> ({playerEyes:eyeDiagnostics,media:media.diagnostics(),mediaOcclusion:app.mediaOcclusion&&{complete:app.mediaOcclusion.complete,reasons:app.mediaOcclusion.reasons,stats:app.mediaOcclusion.stats},backend:selected.backend,fallbackReason:selected.fallbackReason,renderSize:[engine.canvas.width,engine.canvas.height],cameraView:followCamera.state,portalLongEdge:portals.views.maxLongEdge,frames:diagnosticFrame,worldId:active?.identity.worldId,contentDigest:active?.identity.contentDigest,position:active?.player.position.toArray(),mode:active?.player.mode,grounded:active?.player.grounded,boxes:active?.colliders.boxes.length,assets:active?.assets,weather:weatherState,environment:env,water:water??null,nativeIsland:nativeIslandDiagnostics(active,selected.backend),assetBatches:active?.assetBatchCount,portals:portals.diagnostics(),portalEffects:portalEffects.diagnostics(),portalMeld:publicMeld?.diagnostics()??null,avatar:{appearance:app.player.avatarAppearance??loadAppearance(),loaded:!!(avatar.scanned||avatar.model),model:avatar.characterAsset??avatar.asset??avatar.appearance?.style},retro:{active:retro.active,near:retro.nearest(engine.camera.position)?.kind},neons:collectNeonDiagnostics(active)}));
   }catch(error){failFrame(error);}
  });
  document.querySelector('#portal-recover').onclick=()=>void portals.recover().catch(error=>{document.querySelector('#portal-status').textContent=error.message;});
@@ -314,7 +309,7 @@ async function init(){
   document.querySelector('#panel h1').textContent=active.project.metadata.name;
   if(installation.kind==='published'){report('Warehouse, Dock, Table Tennis Room and Neon Shift · single player');document.querySelector('#portal-status').textContent='Choose Dock, the gold Table Tennis Room doorway or the violet Neon Shift doorway. Each has a Warehouse return.';}else report('Published island · revision '+(active.identity.resolvedCommit??validateOpeningWorld(config).source.ref).slice(0,12)+' · '+selected.backend);
  })().catch(error=>{openingProgress.fail(error.message);report('Opening world could not load: '+error.message);document.querySelector('#portal-status').textContent='Opening world unavailable. Retry by reloading, or choose a repository.';});
- window.addEventListener('pagehide',()=>{publicMeld?.dispose();graphics?.dispose();sunsetOutput?.dispose();playerEyes?.dispose();media.dispose();refraction?.dispose();objectAccess.invalidate();worldWelcome.dispose();welcomeView.dispose();controlsHelp.dispose();portals.dispose();portalEffects.dispose();retro.dispose();avatar.dispose();host.dispose();engine.stop();if(isWebGL)engine.dispose();else GPU.device?.destroy();});report('Fred '+selected.backend+' ready. Open a world repository folder or public GitHub source.');
+ window.addEventListener('pagehide',()=>{frameDiagnostics.read();publicMeld?.dispose();graphics?.dispose();sunsetOutput?.dispose();playerEyes?.dispose();media.dispose();refraction?.dispose();objectAccess.invalidate();worldWelcome.dispose();welcomeView.dispose();controlsHelp.dispose();portals.dispose();portalEffects.dispose();retro.dispose();avatar.dispose();host.dispose();engine.stop();if(isWebGL)engine.dispose();else GPU.device?.destroy();});report('Fred '+selected.backend+' ready. Open a world repository folder or public GitHub source.');
  window.dispatchEvent(new CustomEvent('repository-world-ready',{detail:app}));
 }
 init().catch(error=>{console.error(error);openingProgress.fail(error.message);report(error.message);});

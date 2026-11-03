@@ -190,9 +190,9 @@ test('return-only metadata is re-read for dynamic aligned doors and keeps both s
 });
 
 test('missing and malformed route metadata retains its existing lookup and error behavior',()=>{
- for(const project of [undefined,{}, {portals:null},{portals:[null]}]){
+ for(const project of [undefined,{}, {portals:null},{portals:[null]},{portals:[undefined]},{portals:Array(1)}]){
   const {views}=setup(),root=new T.Group(),node=new T.Group();node.userData.portalAperture=true;node.userData.portalId='door';root.add(node);
   views.setDestination('a',{source:pose(),destination:pose([10,0,0]),candidate:{root,project},ownsCandidate:false,authorizedView:true,state:'live'});views.resolveNestedDestination=()=>assert.fail('missing route resolved');
-  if(project?.portals?.[0]===null)assert.throws(()=>views.render(),TypeError);else assert.doesNotThrow(()=>views.render());views.dispose();
+  if(project?.portals?.length)assert.throws(()=>views.render(),TypeError);else assert.doesNotThrow(()=>views.render());views.dispose();
  }
 });

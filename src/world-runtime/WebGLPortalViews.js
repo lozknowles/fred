@@ -155,13 +155,16 @@ export class WebGLPortalViews{
  }
  _drawWithNested(e,size,time){
   const outer={renderer:this.renderer,sourceCamera:this.mainCamera,camera:e.camera,source:e.source,destination:e.destination,scene:e.scene,candidate:e.candidate,target:e.target,width:size.width,height:size.height,time,ordinaryToneMapping:this.ordinaryToneMapping};
-  if(!this.resolveNestedDestination)return drawWebGLPortal(outer);
-  const portals=candidateProject(e.candidate)?.portals;
+  if(!this.resolveNestedDestination||this.nestedDraws>=this.maxViews)return drawWebGLPortal(outer);
+  const project=candidateProject(e.candidate),portals=project?.portals;
   // Re-read authored routes each draw; a return-only destination cannot expose
   // another view. Keep malformed lists on the existing validation/error path.
-  if(this.nestedDraws>=this.maxViews||(Array.isArray(portals)&&!portals.some(p=>!p||(p.id!==e.destination.id&&p.enabled&&p.view?.enabled!==false))))return drawWebGLPortal(outer);
+  if(Array.isArray(portals)){
+   const index=portals.findIndex(portal=>!portal||(portal.id!==e.destination.id&&portal.enabled&&portal.view?.enabled!==false));
+   if(index<0)return drawWebGLPortal(outer);
+  }
   mapViewCamera(this.mainCamera,e.camera,e.source,e.destination);
-  const visibleApertures=new Set(),restores=[],project=candidateProject(e.candidate),worldId=candidateWorldId(e.candidate);
+  const visibleApertures=new Set(),restores=[],worldId=candidateWorldId(e.candidate);
   // A direct owner grant through another door does not authorize this viewpoint.
   try{
    const apertures=[];e.candidate.root.traverse(node=>{if(node.userData.portalAperture)apertures.push(node);});

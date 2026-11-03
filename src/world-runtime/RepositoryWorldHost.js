@@ -135,16 +135,14 @@ export class RepositoryWorldHost {
  environment(){const env=this.active?.project.environment;if(!env)return null;return this.overlay?{...env,timeOfDay:this.overlay.worldHour??env.timeOfDay}:env;}
  nearestComputer(){return nearestRepositoryComputer(this.active,this.engine.camera.position);}
  nearestMedia(){return nearestRepositoryMedia(this.active);}
- update(dt,time,{move=true,interact=move,viewCamera=this.engine.camera,environment=this.environment(),collectNeons=false}={}){
+ update(dt,time,{move=true,interact=move,viewCamera=this.engine.camera,environment=this.environment()}={}){
   if(!this.active)return;const {player,root,forest}=this.active;this.active.query?.setTime(time);
   const nativeIsland=this.active.nativeIsland;
   if(move&&(!nativeIsland||nativeIsland.canOccupy(player.position.x,player.position.z,Math.max(3,player.velocity.length()*dt+2))))player.update(dt);
   nativeIsland?.update(dt,viewCamera);this.active.traffic?.update(dt,{x:player.position.x,z:player.position.z,yaw:player.yaw,kind:'pedestrian'});forest?.userData.updateTreeLOD(time,viewCamera.position);
   const configs=new Map((this.overlay?.signs??[]).map(s=>[s.id,s]));
-  const neons=collectNeons?[]:null;
-  root.traverse(node=>{if(node.userData.updateNeon){const state=configs.get(node.userData.neonObjectId);const elapsed=Number.isFinite(state?.effectStartMs)?Math.max(0,(Date.now()+(this.overlay?.offsetMs??0)-state.effectStartMs)/1000):time;node.userData.updateNeon(elapsed,environment?.timeOfDay??14,state?.powered??state?.config?.powered);}if(neons&&node.userData.neonState)neons.push(node.userData.neonState);});
+  root.traverse(node=>{if(!node.userData.updateNeon)return;const state=configs.get(node.userData.neonObjectId);const elapsed=Number.isFinite(state?.effectStartMs)?Math.max(0,(Date.now()+(this.overlay?.offsetMs??0)-state.effectStartMs)/1000):time;node.userData.updateNeon(elapsed,environment?.timeOfDay??14,state?.powered??state?.config?.powered);});
   if(interact&&this.input.pressed.has('KeyE')){const computer=this.nearestComputer();if(computer)this.onInteract(computer,this.active);}
-  return neons??undefined;
  }
  disconnect(){this.pendingUpdate=null;++this.generation;this.setRuntimeOverlay(null);this.input._clearTransientInput();}
  dispose(){this.disconnect();this.disposed=true;for(const prepared of [...this.prepared])this.discardPrepared(prepared);if(!this.retainResources(this.active))this.disposeCandidate(this.active);this.active=null;}
