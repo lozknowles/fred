@@ -2,7 +2,7 @@
 
 Private development repository for ElseMesh and Loz's Warehouse Island. The game engine is on [main](https://github.com/lozknowles/fred/tree/main) and the authored world is on [warehouse-world](https://github.com/lozknowles/fred/tree/warehouse-world). The public game continues to serve the last public release. [Play the public release](https://lozknowles.github.io/ElseMesh/).
 
-To work on both components, clone this repository and create a sibling world checkout with `git worktree add ../opening-world warehouse-world`. Build the engine with `npm ci` and `npm run build`. The engine pins the exact world revision in `public/opening-world.json`. Package from a clean checkout of that revision using `tools/package-published-worlds.mjs`; its fourth argument is the previously shipped static site. Fresh builds of this private source are local. Original public branch and tag tips are preserved under the `archive/engine/` and `archive/warehouse/` namespaces.
+To work on both components, clone this repository and create a sibling world checkout with `git worktree add ../opening-world warehouse-world`. Build the engine with `npm ci` and `npm run build`. The engine pins the exact world revision in `public/opening-world.json`. Package from a clean checkout of that revision using `tools/package-published-worlds.mjs`; its fourth argument is the previously shipped static site. Add `--fresh-origin` when building a new local preview that has no previously open tabs. It preserves the editor and licences while omitting historical application chunks. Original public branch and tag tips are preserved under the `archive/engine/` and `archive/warehouse/` namespaces.
 
 ## Public edition
 

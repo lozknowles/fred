@@ -9,8 +9,8 @@ import {packageOutputSurfaceDerivative} from './output-surface-transform.mjs';
 import {validatePublishedWorldCatalog} from '../src/world-runtime/PublishedWorldCatalog.js';
 import {TABLE_TENNIS_SPLAT_PROFILE,assertQualifiedSplatProfile} from '../src/world-runtime/SplatSceneProfiles.js';
 import {loadWorldSource,repositoryDigest} from '../src/world-runtime/vendor/world-engine-contract.js';
-const [buildArg,worldArg,outputArg,previousPagesArg]=process.argv.slice(2);
-if(!buildArg||!worldArg||!outputArg||!previousPagesArg)throw Error('Usage: node tools/package-published-worlds.mjs BUILD PINNED_WORLD_REPOSITORY NEW_OUTPUT PREVIOUS_PUBLIC_PAGES');
+const [buildArg,worldArg,outputArg,previousPagesArg,mode]=process.argv.slice(2);
+if(!buildArg||!worldArg||!outputArg||!previousPagesArg||(mode&&mode!=='--fresh-origin'))throw Error('Usage: node tools/package-published-worlds.mjs BUILD PINNED_WORLD_REPOSITORY NEW_OUTPUT PREVIOUS_PUBLIC_PAGES [--fresh-origin]');
 const build=await fs.realpath(buildArg),world=await fs.realpath(worldArg),previous=await fs.realpath(previousPagesArg),output=path.resolve(outputArg);
 const catalog=validatePublishedWorldCatalog(JSON.parse(await fs.readFile(path.join(build,'published-worlds.json'),'utf8')),{baseURL:'https://publication.invalid/ElseMesh/index.html'});
 const opening=catalog.worlds.find(w=>w.worldId===catalog.openingWorldId),room=catalog.worlds.find(w=>w.worldId===ROOM_WORLD_ID),dock=catalog.worlds.find(w=>w.worldId===DOCK_WORLD_ID);
@@ -77,7 +77,9 @@ if(shiftPackage){const destination=path.join(output,shift.bundlePath);await fs.m
 async function inspect(dir){const info=await fs.lstat(dir);if(info.isSymbolicLink())throw Error('Symlink in public editor');if(info.isDirectory())for(const name of await fs.readdir(dir))await inspect(path.join(dir,name));else if(!info.isFile())throw Error('Invalid editor file');}
 // Keep bounded immutable asset names used by tabs opened before this release.
 const priorAssets=path.join(previous,'assets'),outputAssets=path.join(output,'assets');
-const priorNames=await fs.readdir(priorAssets);if(priorNames.length>96)throw Error('Too many prior application assets');
+// A new origin has no existing visitors that could request historical chunks.
+// The prior editor, its licences and the world provenance are still preserved.
+const priorNames=mode==='--fresh-origin'?[]:await fs.readdir(priorAssets);if(priorNames.length>96)throw Error('Too many prior application assets');
 let retainedAssetBytes=0,retainedAssetCount=0;
 for(const name of priorNames){
  if(name.includes('..')||!/^[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(name))throw Error('Unexpected prior application asset');
