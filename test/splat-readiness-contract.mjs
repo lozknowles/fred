@@ -8,6 +8,23 @@ import {RepositoryPortalRuntime} from '../src/world-runtime/RepositoryPortalRunt
 import {createWorld} from '../src/world-runtime/vendor/world-engine-contract.js';
 import {ResidentRepositoryWorlds} from '../src/world-runtime/ResidentRepositoryWorlds.js';
 const asset={sha256:'66334b9bcea5abb6b2a310c44c584fd7fdc8fb999db9c718c785473c41019298',bytes:12690032,count:719538};
+function readyProgramContract(){
+ const properties=new WeakMap();
+ return {
+  properties:{get:material=>properties.get(material)},
+  compile(scene){
+   const materials=new Set();
+   scene.traverse(node=>{
+    if(!(node.isMesh||node.isPoints||node.isLine||node.isSprite)||!node.material)return;
+    for(const material of Array.isArray(node.material)?node.material:[node.material]){
+     materials.add(material);
+     if(!properties.has(material))properties.set(material,{programs:new Map([['main',{program:{},isReady:()=>true}]])});
+    }
+   });
+   return materials;
+  }
+ };
+}
 function target(){const rt=new T.WebGLArrayRenderTarget(2048,352,1,{format:T.RGBAIntegerFormat,type:T.UnsignedIntType,minFilter:T.NearestFilter,magFilter:T.NearestFilter,generateMipmaps:false});const color=rt.texture.clone();color.format=T.RGBAFormat;color.type=T.UnsignedByteType;color.internalFormat='RGBA8';rt.textures=[rt.texture,color];return rt;}
 function fixture({register=true,unallocated=false}={}){
  const targets=[target(),target(),target()],accumulators=targets.map(target=>({target,extSplats:false,covSplats:false}));if(unallocated)accumulators[2].target=null;
@@ -53,7 +70,7 @@ test('diagnostic failures identify exact sampler layout or initial ownership wit
 
 test('controlled lifecycle reproduction: generic preparation allocates a post-snapshot target before resident registration',async()=>{
  const f=fixture({unallocated:true}),manager=new ResidentRepositoryWorlds({renderer:'webgl2',readinessFingerprint:signature}),loaded={identity:{worldId:'lifecycle',contentDigest:'hash'}},descriptor={worldId:'lifecycle',contentDigest:'hash',epoch:1};let draws=0;
- const renderer={target:null,clippingPlanes:[],autoClear:false,getRenderTarget(){return this.target;},setRenderTarget(value){this.target=value;},render(){draws++;f.accumulators[2].target=f.targets[2];},compile:()=>{}};
+ const renderer={target:null,clippingPlanes:[],autoClear:false,getRenderTarget(){return this.target;},setRenderTarget(value){this.target=value;},render(){draws++;f.accumulators[2].target=f.targets[2];},...readyProgramContract()};
  await prepareWebGLRepositoryResources({renderer,camera:new T.PerspectiveCamera(),root:f.candidate.root,targetScene:new T.Scene()});assert.equal(draws,2);
  assert.throws(()=>manager.register(loaded,descriptor,f.candidate),error=>{assert.equal(error.reason,'pool.target');assert.equal(error.details.index,2);assert.equal(error.details.registeredTarget,null);assert.equal(error.details.currentTarget.textures[0],f.targets[2].texture.id);assert.ok(error.callSites.some(line=>line.includes('webGLRepositoryReadinessSignature')||line.includes('WebGLRepositoryReadiness')));return true;});assert.equal(manager.records.size,0);assert.equal(f.contract.diagnostics().targets,2);manager.dispose();f.dispose();
 });
@@ -62,7 +79,7 @@ test('post-registration diagnostic context and disposal reasons retain safe iden
 test('actual preview catch preserves controlled post-registration guard evidence through candidate disposal and JSON report',async()=>{
  const f=fixture({unallocated:true}),project=createWorld('Managed sampler preparation diagnostic'),source=createWorld('Viewer'),exitId='elsemesh-portal:managed-exit';project.portals=[{id:exitId,name:'Exit',position:[0,1.5,0],yaw:0,width:3,height:3,destination:{worldId:source.metadata.worldId,regionId:source.metadata.regionId,portalId:'elsemesh-portal:source'},enabled:true,view:{enabled:true,maxDistance:20},traversal:{enabled:true},policyRef:'test',visual:{frameColor:'#abcdef',unavailableColor:'#334455'}}];
  const descriptor={worldId:project.metadata.worldId,contentDigest:'hash',epoch:1,published:{descriptor:{authority:{nodeId:'owner'}}}},loaded={project,identity:{worldId:descriptor.worldId,contentDigest:'hash'}},manager=new ResidentRepositoryWorlds({renderer:'webgl2',readinessFingerprint:signature});let cleaned=false;
- const renderer={target:null,clippingPlanes:[],autoClear:false,getRenderTarget(){return this.target;},setRenderTarget(target){this.target=target;},render(){f.accumulators[2].target=f.targets[2];},compile:()=>{}};
+ const renderer={target:null,clippingPlanes:[],autoClear:false,getRenderTarget(){return this.target;},setRenderTarget(target){this.target=target;},render(){f.accumulators[2].target=f.targets[2];},...readyProgramContract()};
  const runtime=Object.assign(Object.create(RepositoryPortalRuntime.prototype),{epoch:0,transport:{connectionEpoch:1,subscribe:async()=>descriptor},host:{active:{identity:{worldId:source.metadata.worldId}},prepareResources:async()=>{}},engine:{camera:new T.PerspectiveCamera(),prepareRepositoryResources:root=>prepareWebGLRepositoryResources({renderer,camera:new T.PerspectiveCamera(),root,targetScene:new T.Scene()})},previewRecords:new Map(),descriptors:new Map(),residents:manager,views:{setState(){}},portalErrors:new Map(),onStatus(){},load:async()=>loaded,buildScene:async sceneDescriptor=>{f.candidate.descriptor=sceneDescriptor;return f.candidate;},addPortalFrame(){},disposeGraphics(){cleaned=true;f.dispose();}});
  const portal={id:'elsemesh-portal:source',name:'Door',destination:{worldId:project.metadata.worldId,portalId:exitId}};await runtime.preview(portal);assert.equal(cleaned,true);assert.equal(manager.records.size,0);const saved=JSON.parse(JSON.stringify({portalErrors:[...runtime.portalErrors],previews:[...runtime.previewRecords.values()]}));const error=saved.portalErrors[0][1];assert.match(error,/\[pool.target\]/);assert.match(error,/registeredTarget.*null/);assert.match(error,/Signature caller/);assert.match(error,/ResidentRepositoryWorlds.register/);assert.equal(saved.previews[0].error,error);assert.equal(f.contract.diagnostics().disposalListeners,0);manager.dispose();
 });
@@ -70,6 +87,6 @@ test('actual preview catch preserves controlled post-registration guard evidence
 test('controlled complete initial pool survives generic preparation and one-time resident registration without later enrollment',async()=>{
  const f=fixture({register:false,unallocated:true});class InitialAccumulator{ensureGenerate({maxSplats}){assert.equal(maxSplats,719538);if(this.target)return false;this.target=f.targets[this.index];this.maxSplats=720896;return true;}}
  for(const[index,a]of f.accumulators.entries()){Object.setPrototypeOf(a,InitialAccumulator.prototype);Object.assign(a,{index,mapping:[],version:3,mappingVersion:4,numSplats:719538,maxSplats:a.target?720896:0});}
- const renderer={target:null,viewport:new T.Vector4(0,0,640,480),scissor:new T.Vector4(0,0,640,480),scissorTest:false,autoClear:false,clippingPlanes:[],localClippingEnabled:false,xr:{enabled:false},getRenderTarget(){return this.target;},setRenderTarget(v){this.target=v;},getViewport(v){return v.copy(this.viewport);},getScissor(v){return v.copy(this.scissor);},getScissorTest(){return this.scissorTest;},setViewport(v){this.viewport.copy(v);},setScissor(v){this.scissor.copy(v);},setScissorTest(v){this.scissorTest=v;},initRenderTarget(){},render(){for(const a of f.accumulators)assert.equal(a.ensureGenerate({maxSplats:719538}),false);},compile:()=>{}};
+ const renderer={target:null,viewport:new T.Vector4(0,0,640,480),scissor:new T.Vector4(0,0,640,480),scissorTest:false,autoClear:false,clippingPlanes:[],localClippingEnabled:false,xr:{enabled:false},getRenderTarget(){return this.target;},setRenderTarget(v){this.target=v;},getViewport(v){return v.copy(this.viewport);},getScissor(v){return v.copy(this.scissor);},getScissorTest(){return this.scissorTest;},setViewport(v){this.viewport.copy(v);},setScissor(v){this.scissor.copy(v);},setScissorTest(v){this.scissorTest=v;},initRenderTarget(){},render(){for(const a of f.accumulators)assert.equal(a.ensureGenerate({maxSplats:719538}),false);},...readyProgramContract()};
  preparePinnedAccumulatorTargets({spark:f.spark,renderer,SplatAccumulator:InitialAccumulator});const contract=registerPinnedSparkReadiness(f.adapter,{asset});assert.equal(contract.diagnostics().targets,3);await prepareWebGLRepositoryResources({renderer,camera:new T.PerspectiveCamera(),root:f.candidate.root,targetScene:new T.Scene()});const manager=new ResidentRepositoryWorlds({renderer:'webgl2',readinessFingerprint:signature}),record=manager.register({identity:{worldId:'prepared',contentDigest:'hash'}},{worldId:'prepared',contentDigest:'hash',epoch:1},f.candidate);for(const i of [1,2,0,1]){f.swap(i);assert.equal(manager.isReady(record),true);}assert.equal(contract.diagnostics().targets,3);manager.dispose();contract.dispose();f.dispose();
 });
