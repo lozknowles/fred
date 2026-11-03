@@ -167,3 +167,7 @@ Vehicle authors, licence terms, modifications and source availability are in
 [the vehicle credits](public/models/port/CREDITS.md). Third-party vehicle assets
 are not relicensed under the game's MIT licence. Release clearance remains
 subject to the recorded unresolved items.
+
+## Avatar tour voice
+
+The five playable avatar lines were generated for private Fred using Loz's previously approved voice profile. Open Avatar (K) to choose a line, then press J while exploring to hear it. Only the finished clips are bundled.

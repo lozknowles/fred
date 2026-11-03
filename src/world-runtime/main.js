@@ -101,6 +101,7 @@ async function init(){
     primeWebGLWeatherShelter(engine,candidate.root);
    }
    return candidate;}catch(error){disposeWebGLRepositoryScene(candidate);throw error;}};
+  const disposeGL=candidate=>{publicDuck?.releaseCandidate(candidate);disposeWebGLRepositoryScene(candidate);};
   backendHost={buildCandidate:buildGL,disposeCandidate:disposeGL,buildNeon:buildWebGLNeon};
   backendPortals={buildScene:buildGL,disposeCandidate:disposeGL,createPeerLayer:(scene,id)=>createWebGLRepositoryPeerLayer(scene,id,engine.prepareRepositoryResources),addPortalFrame:addWebGLPortalFrame,views:new WebGLPortalViews({engine,maxViews:installation.kind==='published'?3:2,mainCamera:engine.camera,configureScene:configureWebGLRepositoryScene})};
   renderer=engine.renderer;
