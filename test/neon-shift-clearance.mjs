@@ -9,13 +9,42 @@ const source=new URL('../../opening-world/',import.meta.url),read=base=>async p=
 const warehouse=await loadWorldSource({kind:'local',read:read(source)},{expectedContentDigest:SHIFT_WAREHOUSE_CONTENT_DIGEST}),shift=await loadWorldSource({kind:'local',read:read(new URL('worlds/neon-shift/',source))},{expectedWorldId:SHIFT_WORLD_ID,expectedContentDigest:SHIFT_CONTENT_DIGEST});
 function candidate(loaded){const d=describeRuntimeWorld(loaded.project),colliders=new Colliders();for(const b of d.boxes)colliders.addBox(new Vector3(...b.center),new Vector3(...b.half),0,{walkable:b.walkable,solid:b.solid,tag:b.id});return {project:loaded.project,terrain:d.terrain,colliders};}
 const wc=candidate(warehouse),sc=candidate(shift),wp=warehouse.project.portals.find(p=>p.id===SHIFT_WAREHOUSE_PORTAL_ID),rp=shift.project.portals.find(p=>p.id===SHIFT_RETURN_PORTAL_ID);
+test('the Warehouse mezzanine posts stop a sprint from either side without closing the aisle',()=>{
+ const boxes=describeRuntimeWorld(warehouse.project).boxes;
+ for(const [x,name] of [[-14,'west'],[-7,'middle'],[0,'center']]){
+  const id='warehouse:collision:mezzanine-rsj-'+name;
+  const proxy=warehouse.project.objects.find(o=>o.id===id);
+  assert.ok(proxy?.visible&&proxy.collisionOnly&&proxy.collision==='solid');
+  const box=boxes.find(b=>b.id===id);
+  assert.ok(box?.solid&&!box.walkable);
+  const expectedCenter=[x,4.77,-74.18],expectedHalf=[.28,1.775,.28];
+  for(let i=0;i<3;i++){
+   assert.ok(Math.abs(box.center[i]-expectedCenter[i])<1e-5);
+   assert.ok(Math.abs(box.half[i]-expectedHalf[i])<1e-5);
+  }
+  const post=new Colliders();
+  post.addBox(new Vector3(...box.center),new Vector3(...box.half),0,{solid:box.solid,walkable:box.walkable,tag:id});
+  for(const dir of [-1,1]){
+   const body=new Vector3(x,3,-74.18-dir*1.2);
+   for(let i=0;i<24;i++){
+    body.z+=dir*6.2*.05;
+    post.resolveCapsule(body,.3,1.8,.001);
+    assert.ok(dir*(body.z+74.18)<=-.58+1e-5,'sprint crossed the near face of '+id);
+   }
+   assert.ok(Math.abs(Math.abs(body.z+74.18)-.58)<1e-5);
+  }
+ }
+ const aisle=new Vector3(-1,3,-73);
+ for(let i=0;i<8;i++){aisle.z-=6.2*.05;wc.colliders.resolveCapsule(aisle,.3,1.8,.001);}
+ assert.ok(aisle.z<-75);
+});
 // Match the installed pinned runtime, not only its authored source boxes.
 sc.terrain=createNeonStreetBoundary(sc.terrain);installNeonStreetClearance(sc.colliders);
 const native=await readNativeIslandSource(warehouse.project,createNativeIslandResourceReader(warehouse.project,warehouse.nativeIslandRead)),terrain=new NativeIslandTerrain({...native.domain,coarse:native.coarse}),cache=new NativeIslandTiles({tiles:native.tiles,readTile:native.readTile,onLoad:(t,d)=>terrain.apply(t,d)});terrain.cache=cache;wc.terrain=terrain;const release=await cache.ensureAt(wp.position[0],wp.position[2],4);
 // The 7e-8 m inset below only avoids exact-edge trig rounding in the aperture
 // predicate. Capsule clearance covers the entire 1.4 m usable band to that tolerance.
 const validate=(c,a,b)=>{PublicPortalRuntime.prototype.validateSegment.call({},c,a,b);const count=Math.max(1,Math.ceil(Math.hypot(...b.map((v,i)=>v-a[i]))/.05));for(let n=0;n<=count;n++){const p=a.map((v,i)=>v+(b[i]-v)*n/count);for(let k=0;k<8;k++){const angle=k*Math.PI/4,g=Player.prototype.groundAt.call(c,p[0]+Math.cos(angle)*.35,p[2]+Math.sin(angle)*.35,p[1]+.001);assert.ok(Number.isFinite(g)&&Math.abs(g-p[1])<.08,'Full 0.35m footprint must retain support');}}};
-test('Neon Shift fixed source and reciprocal third Warehouse doorway preserve identity and unrelated portals',()=>{assert.equal(wc.colliders.boxes.length,113);assert.equal(sc.project.metadata.regionId,SHIFT_REGION_ID);assert.equal(sc.project.assets.length,0);assert.equal(wc.project.portals.length,3);assert.equal(rp.destination.portalId,wp.id);assert.equal(wp.destination.portalId,rp.id);assert.equal(wp.destination.worldId,SHIFT_WORLD_ID);assert.equal(rp.destination.worldId,warehouse.identity.worldId);assert.deepEqual(wp.position,[1.4,4.8,-81]);for(const id of ['elsemesh-portal:3b1b0e2d-bb73-4660-b916-2edf7678699a','elsemesh-portal:42b50e2b-6845-4c50-abd9-7b8234fbb034']){const p=wc.project.portals.find(p=>p.id===id);assert.ok(p);assert.ok(Math.hypot(p.position[0]-wp.position[0],p.position[2]-wp.position[2])>p.width/2+wp.width/2+.3);}});
+test('Neon Shift fixed source and reciprocal third Warehouse doorway preserve identity and unrelated portals',()=>{assert.equal(wc.colliders.boxes.length,116);assert.equal(sc.project.metadata.regionId,SHIFT_REGION_ID);assert.equal(sc.project.assets.length,0);assert.equal(wc.project.portals.length,3);assert.equal(rp.destination.portalId,wp.id);assert.equal(wp.destination.portalId,rp.id);assert.equal(wp.destination.worldId,SHIFT_WORLD_ID);assert.equal(rp.destination.worldId,warehouse.identity.worldId);assert.deepEqual(wp.position,[1.4,4.8,-81]);for(const id of ['elsemesh-portal:3b1b0e2d-bb73-4660-b916-2edf7678699a','elsemesh-portal:42b50e2b-6845-4c50-abd9-7b8234fbb034']){const p=wc.project.portals.find(p=>p.id===id);assert.ok(p);assert.ok(Math.hypot(p.position[0]-wp.position[0],p.position[2]-wp.position[2])>p.width/2+wp.width/2+.3);}});
 test('actual player capsule qualifies both source lanes, mapped arrivals and egress across the full usable doorway width',()=>{let samples=0;for(const [a,b,ca,cb]of [[wp,rp,wc,sc],[rp,wp,sc,wc]])for(let i=0;i<=280;i++){const x=-.7+i*.005+(i===0?7e-8:i===280?-7e-8:0),y=-1.8,front=portalWorldPoint(a,[x,y,1.2]),plane=portalWorldPoint(a,[x,y,0]),back=portalWorldPoint(a,[x,y,-1.2]);validate(ca,front,plane);validate(ca,plane,back);assert.ok(sweepPortalCapsule({portal:a,previousFeet:portalWorldPoint(a,[x,y,.2]),nextFeet:portalWorldPoint(a,[x,y,-.2]),radius:.3,bodyHeight:1.8}));const mapped=mapPortalPoint(a,b,portalWorldPoint(a,[x,y,-.02])),arrival=portalWorldPoint(b,[-x,y,.15]),egress=portalWorldPoint(b,[-x,y,.9]);validate(cb,mapped,arrival);validate(cb,arrival,egress);samples++;}assert.equal(samples,562);});
 test('the rejected z=-80 candidate remains a regression case against the actual chair collider',()=>{const old={...wp,position:[1.4,4.8,-80]},chair=wc.colliders.boxes.find(b=>b.tag==='warehouse:object:0834');assert.ok(chair);assert.deepEqual(chair.center.toArray(),[.92,3.52,-78.6]);assert.throws(()=>validate(wc,portalWorldPoint(old,[-.7,-1.8,1.2]),portalWorldPoint(old,[-.7,-1.8,0])),/solid geometry/);});
 test('Warehouse spawn reaches the new portal around furnishings without crossing the other doorways',()=>{const nav=new Navigation({terrain:wc.terrain,colliders:wc.colliders,config:{radius:.3,height:1.8,stepHeight:.001,maxDrop:.08}}),route=[wc.project.spawn.position,[-4,3,-79.5],[1.4,3,-79.5],[1.4,3,-80.8]];for(let i=1;i<route.length;i++){assert.ok(nav.segment(new Vector3(...route[i-1]),new Vector3(...route[i])),JSON.stringify(route.slice(i-1,i+1)));for(const p of wc.project.portals.filter(p=>p.id!==wp.id))assert.equal(sweepPortalCapsule({portal:p,previousFeet:route[i-1],nextFeet:route[i],radius:.3,bodyHeight:1.8}),null);}});
