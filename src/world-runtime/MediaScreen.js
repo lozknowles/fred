@@ -124,25 +124,120 @@ export function mediaScreenUnobstructed(projection,camera,bounds,{complete=false
  }
  return true;
 }
-/** Reveal only TV cells whose entire camera sight volume is proven clear. */
-export function mediaScreenCellVisibility(projection,camera,bounds,{complete=false,columns=6,rows=4}={}){
- const hidden={visible:false,partial:false,mask:null,clearCells:0,totalCells:columns*rows};
- if(!complete||!projection||!validViewport(projection.viewport)||!Number.isInteger(columns)||!Number.isInteger(rows)||columns<1||rows<1||columns*rows>48)return hidden;
- if(mediaScreenUnobstructed(projection,camera,bounds,{complete:true}))return {visible:true,partial:false,mask:null,clearCells:columns*rows,totalCells:columns*rows};
+// Double precision clipping and outward padding keep uncertain boundary pixels hidden.
+const MEDIA_WORLD_PAD=1e-7,MEDIA_U_PAD=1/1280,MEDIA_V_PAD=1/720;
+const MEDIA_MASK_LIMITS={bounds:4096,fragments:256,vertices:4096,work:120000,svg:180000};
+function uvHull(points){
+ const sorted=points.slice().sort((a,b)=>a.x-b.x||a.y-b.y),cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+ const half=input=>{const out=[];for(const p of input){while(out.length>1&&cross(out[out.length-2],out[out.length-1],p)<=0)out.pop();out.push(p);}return out;};
+ if(sorted.length<3)return [];
+ return [...half(sorted).slice(0,-1),...half(sorted.slice().reverse()).slice(0,-1)];
+}
+function uvClip(polygon,distance){
+ const out=[];
+ for(let i=0;i<polygon.length;i++){
+  const a=polygon[i],b=polygon[(i+1)%polygon.length],da=distance(a),db=distance(b);
+  if(da>=0)out.push(a);
+  if((da>=0)!==(db>=0)){const t=da/(da-db);out.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});}
+ }
+ return out;
+}
+function sightVolume(projection,camera){
+ if(!camera?.matrixWorld||!camera?.matrixWorldInverse)return null;
+ const far=projection.world,eye=transform(camera.matrixWorld,[0,0,0]),near=camera.near??.1;
+ if(!finitePoint(eye)||!Array.isArray(far)||far.length!==4||!far.every(finitePoint)||!Number.isFinite(near)||near<=0)return null;
+ const vertices=far.map(p=>p.slice());
+ for(const p of far){const depth=-transform(camera.matrixWorldInverse,p)[2];if(!Number.isFinite(depth)||depth<=near)return null;vertices.push(p.map((n,i)=>eye[i]+(n-eye[i])*near/depth));}
+ const centre=[0,1,2].map(i=>vertices.reduce((sum,p)=>sum+p[i],0)/8),faces=[[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]],planes=[];
+ for(const ids of faces){const a=vertices[ids[0]],normal=sightCross(sightSubtract(vertices[ids[1]],a),sightSubtract(vertices[ids[2]],a)),length=Math.hypot(...normal);if(!Number.isFinite(length)||length<1e-12)return null;let n=normal.map(v=>v/length);if(sightDot(n,sightSubtract(centre,a))<0)n=n.map(v=>-v);planes.push({n,d:-sightDot(n,a)});}
+ const a=far[0],u=sightSubtract(far[1],a),v=sightSubtract(far[3],a),normal=sightCross(u,v),uu=sightDot(u,u),uv=sightDot(u,v),vv=sightDot(v,v),det=uu*vv-uv*uv,eyeDistance=sightDot(normal,sightSubtract(a,eye));
+ if(!Number.isFinite(det)||det<=1e-12||!Number.isFinite(eyeDistance)||Math.abs(eyeDistance)<1e-12)return null;
+ if(far[2].some((n,i)=>Math.abs(n-a[i]-u[i]-v[i])>1e-7))return null;
+ return {planes,eye,toUV:p=>{
+  const ray=sightSubtract(p,eye),den=sightDot(normal,ray);if(!Number.isFinite(den)||Math.abs(den)<1e-12)return null;
+  const t=eyeDistance/den;if(!Number.isFinite(t)||t<=0)return null;
+  const delta=ray.map((n,i)=>eye[i]+n*t-a[i]),du=sightDot(delta,u),dv=sightDot(delta,v);
+  return {x:(du*vv-dv*uv)/det,y:(dv*uu-du*uv)/det};
+ }};
+}
+/** Clip a closed convex box, including each new cap face, against the complete
+ * near/TV/side sight planes before projection. Unclipped box projection is unsafe
+ * for boxes crossing the near plane or the actual, possibly oblique, TV plane. */
+function boxSightShadow(bound,volume){
+ const corners=[];for(let x=0;x<2;x++)for(let y=0;y<2;y++)for(let z=0;z<2;z++)corners.push([x?bound.max[0]+MEDIA_WORLD_PAD:bound.min[0]-MEDIA_WORLD_PAD,y?bound.max[1]+MEDIA_WORLD_PAD:bound.min[1]-MEDIA_WORLD_PAD,z?bound.max[2]+MEDIA_WORLD_PAD:bound.min[2]-MEDIA_WORLD_PAD]);
+ let faces=[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]].map(ids=>ids.map(i=>corners[i]));
+ for(const {n,d}of volume.planes){
+  const next=[],cap=[];
+  for(const face of faces){const out=[];for(let i=0;i<face.length;i++){
+   const a=face[i],b=face[(i+1)%face.length],da=sightDot(n,a)+d+MEDIA_WORLD_PAD,db=sightDot(n,b)+d+MEDIA_WORLD_PAD;
+   if(da>=0)out.push(a);
+   if((da>=0)!==(db>=0)){const t=da/(da-db),p=a.map((v,k)=>v+(b[k]-v)*t);out.push(p);cap.push(p);}
+  }if(out.length>=3)next.push(out);}
+  if(cap.length>=3){
+   const centre=[0,1,2].map(k=>cap.reduce((sum,p)=>sum+p[k],0)/cap.length),seed=Math.abs(n[0])<.8?[1,0,0]:[0,1,0],u=sightCross(n,seed),v=sightCross(n,u);
+   cap.sort((a,b)=>{const da=sightSubtract(a,centre),db=sightSubtract(b,centre);return Math.atan2(sightDot(da,v),sightDot(da,u))-Math.atan2(sightDot(db,v),sightDot(db,u));});next.push(cap);
+  }
+  faces=next;if(!faces.length)return [];
+ }
+ const projected=faces.flat().map(volume.toUV);
+ if(projected.some(p=>!p||![p.x,p.y].every(Number.isFinite)))return null;
+ // A mask-pixel Minkowski margin covers floating error and SVG antialias fringes.
+ return uvHull(projected.flatMap(p=>[-MEDIA_U_PAD,MEDIA_U_PAD].flatMap(x=>[-MEDIA_V_PAD,MEDIA_V_PAD].map(y=>({x:p.x+x,y:p.y+y})))));
+}
+// Preserve the old bounded proof on representation overflow. These cells may
+// under-reveal a thin sliver, but every revealed cell is still wholly clear.
+function mediaScreenGridFallback(projection,camera,bounds,columns,rows,hidden){
  const point=(u,v)=>{const [a,b,c,d]=projection.world;return a.map((n,i)=>n*(1-u)*(1-v)+b[i]*u*(1-v)+c[i]*u*v+d[i]*(1-u)*v);};
  const clear=[];
  for(let y=0;y<rows;y++)for(let x=0;x<columns;x++){
   const u0=x/columns,u1=(x+1)/columns,v0=y/rows,v1=(y+1)/rows;
   const cell={world:[point(u0,v0),point(u1,v0),point(u1,v1),point(u0,v1)]};
-  if(mediaScreenUnobstructed(cell,camera,bounds,{complete:true})){
-   const clipped=clipScreenQuad(cell.world.map(p=>project(camera,p,projection.viewport)),projection.viewport);
-   if(clipped)clear.push({x,y});
-  }
+  if(mediaScreenUnobstructed(cell,camera,bounds,{complete:true})&&clipScreenQuad(cell.world.map(p=>project(camera,p,projection.viewport)),projection.viewport))clear.push({x,y});
  }
  if(!clear.length)return hidden;
  const rectangles=clear.map(({x,y})=>'<rect x="'+(1280*x/columns)+'" y="'+(720*y/rows)+'" width="'+(1280/columns)+'" height="'+(720/rows)+'" fill="white"/>').join('');
  const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">'+rectangles+'</svg>';
- return {visible:true,partial:true,mask:'url("data:image/svg+xml,'+encodeURIComponent(svg)+'")',clearCells:clear.length,totalCells:columns*rows};
+ return {...hidden,visible:true,partial:true,mask:'url("data:image/svg+xml,'+encodeURIComponent(svg)+'")',clearCells:clear.length,totalCells:columns*rows,visibleFraction:null,visiblePolygons:clear.length,maskFallback:'proven-clear-grid'};
+}
+/** Continuous silhouettes preserve slivers that contain no fully clear grid cell.
+ * The upstream complete terrain/water/geometry proof is still mandatory. Convex
+ * subtraction emits disjoint visible polygons: overlapping blockers cannot XOR
+ * holes. Hard budgets fail closed, bounding both CPU work and generated SVG.
+ */
+export function mediaScreenCellVisibility(projection,camera,bounds,{complete=false,columns=6,rows=4}={}){
+ const hidden={visible:false,partial:false,mask:null,clearCells:null,totalCells:null,visibleFraction:0,visiblePolygons:0};
+ if(!complete||!projection||!validViewport(projection.viewport)||!Number.isInteger(columns)||!Number.isInteger(rows)||columns<1||rows<1||columns*rows>48||!Array.isArray(bounds))return hidden;
+ if(bounds.some(b=>!finitePoint(b?.min)||!finitePoint(b?.max)||b.min.some((n,i)=>n>b.max[i])))return hidden;
+ if(mediaScreenUnobstructed(projection,camera,bounds,{complete:true}))return {...hidden,visible:true,clearCells:columns*rows,totalCells:columns*rows,visibleFraction:1,visiblePolygons:1};
+ const fallback=()=>mediaScreenGridFallback(projection,camera,bounds,columns,rows,hidden);
+ if(bounds.length>MEDIA_MASK_LIMITS.bounds)return fallback();
+ const volume=sightVolume(projection,camera);if(!volume)return hidden;
+ const viewport=projection.visiblePolygon?.map(p=>({x:p.u,y:p.v}));
+ if(!viewport||viewport.length<3||viewport.some(p=>![p.x,p.y].every(Number.isFinite)))return hidden;
+ const cone={min:[0,1,2].map(k=>Math.min(...projection.world.map(p=>p[k]),volume.eye[k])-MEDIA_WORLD_PAD),max:[0,1,2].map(k=>Math.max(...projection.world.map(p=>p[k]),volume.eye[k])+MEDIA_WORLD_PAD)};
+ let clear=[viewport],work=0;
+ for(const bound of bounds){
+  if(!boxIntersects(bound,cone))continue;
+  const shadow=boxSightShadow(bound,volume);if(shadow===null)return fallback();if(shadow.length<3)continue;
+  const next=[];
+  for(const polygon of clear){
+   let inside=polygon;
+   for(let i=0;i<shadow.length&&inside.length>=3;i++){
+    work+=inside.length;if(work>MEDIA_MASK_LIMITS.work)return fallback();
+    const a=shadow[i],b=shadow[(i+1)%shadow.length],distance=p=>(b.x-a.x)*(p.y-a.y)-(b.y-a.y)*(p.x-a.x);
+    const outside=uvClip(inside,p=>-distance(p));if(outside.length>=3&&polygonArea(outside)>1e-14)next.push(outside);
+    inside=uvClip(inside,distance);
+   }
+  }
+  clear=next;if(!clear.length)return hidden;
+  if(clear.length>MEDIA_MASK_LIMITS.fragments||clear.reduce((n,p)=>n+p.length,0)>MEDIA_MASK_LIMITS.vertices)return fallback();
+ }
+ const area=clear.reduce((sum,p)=>sum+polygonArea(p),0),viewportArea=polygonArea(viewport);
+ if(!Number.isFinite(area)||area<=1e-14||!Number.isFinite(viewportArea)||viewportArea<=0)return hidden;
+ const polygons=clear.map(p=>'<polygon points="'+p.map(({x,y})=>(x*1280)+','+(y*720)).join(' ')+'" fill="white"/>').join('');
+ const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">'+polygons+'</svg>';
+ if(svg.length>MEDIA_MASK_LIMITS.svg)return fallback();
+ return {...hidden,visible:true,partial:true,mask:'url("data:image/svg+xml,'+encodeURIComponent(svg)+'")',visibleFraction:Math.min(1,area/viewportArea),visiblePolygons:clear.length};
 }
 export function mediaScreenSurfaceExcluded(nativeIsland,projection,camera,{margin=.025}={}){
  const water=nativeIsland?.water;if(water?.surfaceExclusionsEnforced!==true||!projection?.world||!Number.isFinite(margin)||margin<0)return false;
@@ -439,6 +534,6 @@ export class MediaScreen {
   this.closeControls();
   this.active=null;this.status.state='closed';
  }
- diagnostics(){return {...this.status,activeObjectId:this.active?.object.id??null,iframePresent:!!this.iframe,controlsOpen:this.controlsOpen,screenVisible:this.screenVisible,screenPartial:this.screenPartial,visibilityLoading:this.sightPending,visibilityError:this.sightError,playbackScope:'local active world only',occlusion:'proven clear TV cells shown; playback continues behind obstructions',audioHeard:false};}
+ diagnostics(){return {...this.status,activeObjectId:this.active?.object.id??null,iframePresent:!!this.iframe,controlsOpen:this.controlsOpen,screenVisible:this.screenVisible,screenPartial:this.screenPartial,visibilityLoading:this.sightPending,visibilityError:this.sightError,playbackScope:'local active world only',occlusion:'proven clear TV silhouette shown; playback continues behind obstructions',audioHeard:false};}
  dispose(){this.exit();this.win.removeEventListener('message',this.message);this.doc.removeEventListener('visibilitychange',this.visibility);}
 }

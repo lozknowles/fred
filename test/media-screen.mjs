@@ -67,14 +67,14 @@ test('viewport clipping does not bypass full-surface occlusion or claim offscree
  const p=clippingFixture(3),corner=p.projection.world[1].map(n=>n/2),bound={min:corner.map(n=>n-.01),max:corner.map(n=>n+.01)};
  assert.equal(mediaScreenUnobstructed(p.projection,p.camera,[bound],{complete:true}),false,'an offscreen corner remains in the conservative full sight proof');
 });
-test('fully onscreen TV keeps a single proven clear cell smaller than 64 pixels',()=>{
+test('fully onscreen TV keeps a proven clear region smaller than 64 pixels',()=>{
  const f=clippingFixture(0,0,-80),projection=f.projection;assert.ok(projection);assert.equal(projection.viewportPartial,false);
  const cellArea=projection.visibleArea/24;assert.ok(cellArea>0&&cellArea<64,'outer TV passes64px while each cell is smaller');
  const z=(-80+mediaLayout(config).frontZ)/2;
  const bounds=[{min:[-1.06,-10,z-.001],max:[10,10,z+.001]},{min:[-10,-10,z-.001],max:[10,.44,z+.001]}];
  const result=mediaScreenCellVisibility(projection,f.camera,bounds,{complete:true});
- assert.equal(result.visible,true);assert.equal(result.partial,true);assert.equal(result.clearCells,1);
- assert.match(decodeURIComponent(result.mask),/<rect x="0" y="0"/);
+ assert.equal(result.visible,true);assert.equal(result.partial,true);assert.ok(result.visibleFraction>0&&result.visibleFraction<1/12);
+ assert.match(decodeURIComponent(result.mask),/<polygon points=/);
 });
 test('whole-screen occlusion includes non-colliding meshes and avatars; wall behind TV does not hide',()=>{const f=fixture(),back=new T.Mesh(new T.BoxGeometry(30,12,.3),new T.MeshBasicMaterial());back.position.set(0,6,-91);f.root.add(back);let result=collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'});assert(result.complete);assert(mediaScreenUnobstructed(f.projection,f.camera,result.bounds,result));const prop=new T.Mesh(new T.BoxGeometry(.5,.5,.5),new T.MeshBasicMaterial());prop.position.set(6.5,5,-86);prop.userData.collision='none';f.root.add(prop);result=collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'});assert.equal(mediaScreenUnobstructed(f.projection,f.camera,result.bounds,result),false);f.root.remove(prop);result=collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv',avatarRoots:[prop]});assert.equal(mediaScreenUnobstructed(f.projection,f.camera,result.bounds,result),false);assert.equal(mediaScreenUnobstructed(f.projection,f.camera,[],{complete:false}),false);});
 test('water proof requires installed enforcement and ALL five points strictly inside SAME bounded volume',()=>{const f=fixture(),water={surfaceExclusionsEnforced:true,surfaceExclusions:[volume]};assert(mediaScreenSurfaceExcluded({water},f.projection,f.camera));assert.equal(mediaScreenSurfaceExcluded({water:{...water,surfaceExclusionsEnforced:false}},f.projection,f.camera),false);assert.equal(mediaScreenSurfaceExcluded({water:{...water,surfaceExclusions:[{...volume,max:[Infinity,8.5,-63.5]}]}},f.projection,f.camera),false);const old=f.camera.position.y;f.camera.position.y=3.1+.025;assert.equal(mediaScreenSurfaceExcluded({water},f.projection,f.camera),false);f.camera.position.y=old;assert.equal(mediaScreenSurfaceExcluded({water:{...water,surfaceExclusions:[{...volume,max:[14.5,8.5,-85]},{...volume,id:'other',min:[-14.5,3.1,-85]}]}},f.projection,f.camera),false);});
@@ -173,13 +173,13 @@ test('offscreen TV and world change retain then close the exact player',()=>{
  manager.dispose();
 });
 
-test('partly blocked TV reveals proven cells without restarting playback; full wall and unknown bounds hide',()=>{
+test('partly blocked TV reveals proven silhouettes without restarting playback; full wall and unknown bounds hide',()=>{
  const f=fixture(),dom=fakeDOM(),prop={min:[6.2,4.6,-86.3],max:[6.8,5.3,-85.7]},wall={min:[0,0,-86.3],max:[13,10,-85.7]};
  const visibility=bounds=>mediaScreenCellVisibility(f.projection,f.camera,bounds,{complete:true});
- const partial=visibility([prop]);assert.equal(partial.visible,true);assert.equal(partial.partial,true);assert(partial.clearCells>0&&partial.clearCells<partial.totalCells);assert.match(partial.mask,/data:image\/svg\+xml/);
+ const partial=visibility([prop]);assert.equal(partial.visible,true);assert.equal(partial.partial,true);assert(partial.visibleFraction>0&&partial.visibleFraction<1);assert.match(partial.mask,/data:image\/svg\+xml/);
  assert.equal(visibility([wall]).visible,false);
  assert.equal(visibility([{min:[0,0,-91],max:[13,10,-90]}]).partial,false);
- assert.equal(visibility([prop,prop]).clearCells,partial.clearCells,'overlapping occluders cannot reveal a hole');
+ assert.ok(Math.abs(visibility([prop,prop]).visibleFraction-partial.visibleFraction)<1e-12,'overlapping occluders cannot reveal a hole');
  assert.equal(mediaScreenCellVisibility(f.projection,f.camera,[prop],{complete:false}).visible,false);
  assert.equal(mediaScreenCellVisibility(f.projection,f.camera,[{min:[NaN,0,0],max:[1,1,1]}],{complete:true}).visible,false);
  let bounds=[prop];
@@ -361,4 +361,64 @@ test('owner upload/compile wrappers preserve this/arguments/results and restore 
 test('current callback replacement falls back and prior compile shader changes are observed',t=>{
  const f=skyFixture();t.after(()=>f.sky.dispose());const index=f.sky.mesh.geometry.index;index.onUploadCallback=()=>{};assert.equal(f.collect().stats.skyInteriorExclusions,0);
  const original=T.Material.prototype.onBeforeCompile;let g;try{T.Material.prototype.onBeforeCompile=function(shader){shader.vertexShader+='\n// altered by prior compile callback';};g=skyFixture();}finally{T.Material.prototype.onBeforeCompile=original;}t.after(()=>g.sky.dispose());g.sky.mesh.material.onBeforeCompile(mockSkyCompileParameters(g),{});assert.equal(g.collect().stats.skyInteriorExclusions,0);assert.equal(g.sky.mediaOcclusionDiagnostics().invalidationReason,'sky-compiled-shader-mismatch');
+});
+
+// Decode the exact polygons consumed by the browser mask, independently of the
+// implementation's visibility metadata.
+function maskPolygons(result){return result.mask?[...decodeURIComponent(result.mask).matchAll(/<polygon points="([^"]+)"/g)].map(m=>m[1].split(' ').map(p=>{const [x,y]=p.split(',').map(Number);return [x/1280,y/720];})):[];}
+function maskShows(result,u,v){
+ if(!result.visible)return false;if(!result.mask)return true;
+ return maskPolygons(result).some(poly=>{let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+  const [x,y]=poly[i],[px,py]=poly[j];if((y>v)!==(py>v)&&u<(px-x)*(v-y)/(py-y)+x)inside=!inside;
+ }return inside;});
+}
+function referenceRayBlocked(projection,camera,bounds,u,v){
+ const eye=camera.position.toArray(),a=projection.world[0],b=projection.world[1],d=projection.world[3],target=a.map((n,i)=>n+(b[i]-n)*u+(d[i]-n)*v),ray=target.map((n,i)=>n-eye[i]),depth=-new T.Vector3(...target).applyMatrix4(camera.matrixWorldInverse).z;
+ return bounds.some(box=>{let lo=camera.near/depth,hi=1;for(let k=0;k<3;k++){
+  if(Math.abs(ray[k])<1e-15){if(eye[k]<box.min[k]||eye[k]>box.max[k])return false;}
+  else{const p=(box.min[k]-eye[k])/ray[k],q=(box.max[k]-eye[k])/ray[k];lo=Math.max(lo,Math.min(p,q));hi=Math.min(hi,Math.max(p,q));}
+ }return lo<=hi;});
+}
+test('continuous silhouette retains a six-pixel sliver with zero clear legacy cells',()=>{
+ const f=clippingFixture(),z=-2.5,maxX=.495*6.4*2.499/4.881,wall={min:[-10,-10,z-.001],max:[maxX,10,z+.001]};
+ let oldClear=0;const point=(u,v)=>f.projection.world[0].map((n,i)=>n+(f.projection.world[1][i]-n)*u+(f.projection.world[3][i]-n)*v);
+ for(let y=0;y<4;y++)for(let x=0;x<6;x++)if(mediaScreenUnobstructed({world:[point(x/6,y/4),point((x+1)/6,y/4),point((x+1)/6,(y+1)/4),point(x/6,(y+1)/4)]},f.camera,[wall],{complete:true}))oldClear++;
+ assert.equal(oldClear,0);
+ const result=mediaScreenCellVisibility(f.projection,f.camera,[wall],{complete:true});
+ assert.equal(result.visible,true);assert.equal(result.partial,true);assert.ok(result.visibleFraction>.003&&result.visibleFraction<.006);
+ assert.equal(maskShows(result,.999,.5),true);assert.equal(maskShows(result,.994,.5),false);
+ assert.equal(result.clearCells,null,'polygon masks never fabricate a coarse cell count');
+ const full={min:[-10,-10,-2.501],max:[10,10,-2.499]};assert.equal(mediaScreenCellVisibility(f.projection,f.camera,[full],{complete:true}).visible,false);
+ assert.equal(mediaScreenCellVisibility(f.projection,f.camera,[],{complete:true}).partial,false);
+ assert.equal(mediaScreenCellVisibility(f.projection,f.camera,[wall],{complete:false}).visible,false);
+});
+test('overlapping, oblique, near-plane and TV-plane silhouettes never reveal ray-blocked UV samples',()=>{
+ const scenarios=[
+  [clippingFixture(),[{min:[-.3,-1,-2.7],max:[.6,.7,-2.2]},{min:[.1,-.2,-3.5],max:[1.2,1.2,-2.4]}]],
+  [clippingFixture(.2,0,-5,.6),[{min:[-.3,-1,-2.7],max:[.6,.7,-2.2]},{min:[1,-1,-5.5],max:[2,1,-3.9]}]],
+  [clippingFixture(),[{min:[0,-10,-.2],max:[.2,10,.1]}]],
+  [clippingFixture(),[{min:[-10,-10,-5],max:[0,10,-4.8]}]],
+  [clippingFixture(),[{min:[-1,-1,-.10000001],max:[0,1,-.09999999]}]],
+ ];
+ for(const [f,bounds]of scenarios){
+  const result=mediaScreenCellVisibility(f.projection,f.camera,bounds,{complete:true});let shown=0;
+  for(let y=0;y<31;y++)for(let x=0;x<47;x++){const u=(x+.37)/47,v=(y+.61)/31;if(maskShows(result,u,v)){shown++;assert.equal(referenceRayBlocked(f.projection,f.camera,bounds,u,v),false,'shown UV must have no ray/AABB intersection');}}
+  assert.ok(shown>0,'each partial fixture must retain real clear picture');
+ }
+ const f=clippingFixture();assert.equal(mediaScreenCellVisibility(f.projection,f.camera,[{min:[-100,-100,-100],max:[100,100,100]}],{complete:true}).visible,false,'camera-inside covering bound fails closed');
+});
+test('silhouette mask work and output stay bounded for repeated blockers and reject unknown bounds',()=>{
+ const f=clippingFixture(),prop={min:[-.4,-.4,-2.6],max:[.4,.4,-2.4]},single=mediaScreenCellVisibility(f.projection,f.camera,[prop],{complete:true});
+ const start=performance.now(),many=mediaScreenCellVisibility(f.projection,f.camera,Array(500).fill(prop),{complete:true}),elapsed=performance.now()-start;
+ assert.equal(many.visible,true);assert.ok(Math.abs(many.visibleFraction-single.visibleFraction)<1e-10);assert.ok(many.mask.length<single.mask.length+1000,'duplicate blockers must not grow the SVG');
+ assert.ok(elapsed<2000,'bounded CPU sanity guard, not an FPS benchmark');
+ for(const bounds of [[{}],[{min:[0,0,0],max:[NaN,1,1]}]])assert.equal(mediaScreenCellVisibility(f.projection,f.camera,bounds,{complete:true}).visible,false);
+ assert.equal(mediaScreenCellVisibility({...f.projection,world:[[NaN,0,0],...f.projection.world.slice(1)]},f.camera,[prop],{complete:true}).visible,false);
+});
+
+test('complex scenes retain whole-clear shortcut and safe legacy cells on polygon overflow',()=>{
+ const f=clippingFixture(),off={min:[100,100,-3],max:[101,101,-2]},clear=mediaScreenCellVisibility(f.projection,f.camera,Array(4097).fill(off),{complete:true});
+ assert.equal(clear.visible,true);assert.equal(clear.partial,false);assert.equal(clear.mask,null);
+ const prop={min:[-.4,-.4,-2.6],max:[.4,.4,-2.4]},fallback=mediaScreenCellVisibility(f.projection,f.camera,Array(4097).fill(prop),{complete:true});
+ assert.equal(fallback.visible,true);assert.equal(fallback.maskFallback,'proven-clear-grid');assert.ok(fallback.clearCells>0&&fallback.clearCells<24);assert.match(decodeURIComponent(fallback.mask),/<rect /);
 });
