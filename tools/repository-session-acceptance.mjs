@@ -5,8 +5,7 @@ import {resolve,dirname} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {WebSocket} from 'ws';
-import {chromium} from '/fast/work/elsemesh-world-repositories-20261023/node_modules/playwright/index.mjs';
-import {createPrivateNeonServer} from '/fast/work/elsemesh-world-repositories-20261023/scripts/private-neon-server.mjs';
+import {chromium} from 'playwright';
 import {newIdentity,signObject,canonical,sha256} from '../network/identity.mjs';
 import {publishRegion} from '../network/federation.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
@@ -27,11 +26,24 @@ import {sign} from 'node:crypto';
 async function bootstrap(port,identity){return new Promise((yes,no)=>{const socket=new WebSocket('ws://127.0.0.1:'+port+'/api');const timer=setTimeout(()=>{socket.terminate();no(Error('Authority bootstrap timeout'));},10000);socket.on('error',no);socket.on('open',()=>socket.send(JSON.stringify({type:'hello',protocol:'elsemesh.neon-session/1',nodeId:identity.nodeId,publicKey:identity.publicKeyPem})));socket.on('message',data=>{const m=JSON.parse(data);if(m.type==='challenge')socket.send(JSON.stringify({type:'auth',sessionId:m.challenge.sessionId,signature:sign(null,Buffer.from(canonical(m.challenge)),identity.privateKeyPem).toString('base64')}));if(m.type==='snapshot'){clearTimeout(timer);socket.close();yes(m);}if(m.type==='error'){clearTimeout(timer);socket.close();no(Error(m.code+':'+m.message));}});});}
 export async function runRepositorySessionAcceptance({evidenceDirectory=resolve(root,'../.local-evidence/outsideworld/repository-session-'+Date.now())}={}){
  await mkdir(evidenceDirectory,{recursive:true,mode:0o700});
- const operator=newIdentity(),authorities=[],contexts=[];let browser,proxy,targetPort=null;const checks=[];
+ const operator=newIdentity(),authorities=[],contexts=[];let browser,proxy,targetPort=null;const checks=[],fixtureEvidence={};
  const check=(name,detail=true)=>checks.push({name,passed:true,detail});
- const originals={};for(const name of ['house','landscape'])originals[name]=await bytesDigest('/fast/world-repositories/'+name);
  try{
-  proxy=createServer(async(req,res)=>{try{const url=new URL(req.url,'http://localhost');let bytes,type='text/javascript';if(url.pathname==='/'){bytes=html;type='text/html';}else if(url.pathname==='/operator.json'){bytes=JSON.stringify({owners:[operator.nodeId]});type='application/json';}else if(url.pathname==='/runtime/RepositorySession.js'||url.pathname==='/runtime/vendor/world-engine-contract.js')bytes=await readFile(resolve(root,'src/world-runtime',url.pathname.slice(9)));else if(/^\/repository\/(house|landscape)\/(world\.json|snapshots\/[a-f0-9]{64}\/[a-z]+\.json|assets\/[a-f0-9]{64}\.glb|imagery\/[a-f0-9]{64}\.(png|jpg))$/.test(url.pathname))bytes=await readFile('/fast/world-repositories/'+url.pathname.slice(12));else{res.writeHead(404);res.end();return;}res.writeHead(200,{'content-type':type,'cache-control':'no-store'});res.end(bytes);}catch(error){res.writeHead(500);res.end(error.message);}});
+  const builderRoot=process.env.ELSEMESH_BUILDER_ROOT,repositoriesRoot=process.env.ELSEMESH_WORLD_REPOSITORIES_ROOT;
+  assert.ok(builderRoot,'Set ELSEMESH_BUILDER_ROOT to the shared authoring repository containing scripts/private-neon-server.mjs.');
+  assert.ok(repositoriesRoot,'Set ELSEMESH_WORLD_REPOSITORIES_ROOT to a directory containing packed house/ and landscape/ fixtures.');
+  let createPrivateNeonServer;
+  try{({createPrivateNeonServer}=await import(pathToFileURL(resolve(builderRoot,'scripts/private-neon-server.mjs')).href));}
+  catch(error){throw Error('Cannot load actual private authority from ELSEMESH_BUILDER_ROOT: '+error.message,{cause:error});}
+  const originals={};
+  for(const name of ['house','landscape'])try{await readFile(resolve(repositoriesRoot,name,'world.json'));originals[name]=await bytesDigest(resolve(repositoriesRoot,name));}
+  catch(error){throw Error('Missing or unreadable packed '+name+' fixture under ELSEMESH_WORLD_REPOSITORIES_ROOT: '+error.message,{cause:error});}
+  let fixtureProvenance={kind:'externally-supplied',description:'Operator-supplied snapshots; historical provenance is not established by this harness.'};
+  try{fixtureProvenance=JSON.parse(await readFile(resolve(repositoriesRoot,'session-fixtures.json'),'utf8'));}
+  catch(error){if(error.code!=='ENOENT')throw error;}
+  Object.assign(fixtureEvidence,{builderRoot:resolve(builderRoot),repositoriesRoot:resolve(repositoriesRoot),fixtureProvenance,repositoryDigests:originals});
+  check('packed fixture inputs identified',{repositoriesRoot:resolve(repositoriesRoot),fixtureProvenance,repositoryDigests:originals});
+  proxy=createServer(async(req,res)=>{try{const url=new URL(req.url,'http://localhost');let bytes,type='text/javascript';if(url.pathname==='/'){bytes=html;type='text/html';}else if(url.pathname==='/operator.json'){bytes=JSON.stringify({owners:[operator.nodeId]});type='application/json';}else if(url.pathname==='/runtime/RepositorySession.js'||url.pathname==='/runtime/vendor/world-engine-contract.js')bytes=await readFile(resolve(root,'src/world-runtime',url.pathname.slice(9)));else if(/^\/repository\/(house|landscape)\/(world\.json|snapshots\/[a-f0-9]{64}\/[a-z]+\.json|assets\/[a-f0-9]{64}\.glb|imagery\/[a-f0-9]{64}\.(png|jpg))$/.test(url.pathname))bytes=await readFile(resolve(repositoriesRoot,url.pathname.slice(12)));else{res.writeHead(404);res.end();return;}res.writeHead(200,{'content-type':type,'cache-control':'no-store'});res.end(bytes);}catch(error){res.writeHead(500);res.end(error.message);}});
   proxy.on('upgrade',(req,socket,head)=>{if(req.url!=='/__private-neon'||!targetPort){socket.destroy();return;}const upstream=request({host:'127.0.0.1',port:targetPort,path:'/api',headers:req.headers});upstream.on('upgrade',(response,peer,upstreamHead)=>{socket.write('HTTP/1.1 101 Switching Protocols\r\n'+Object.entries(response.headers).map(([key,value])=>key+': '+value).join('\r\n')+'\r\n\r\n');if(head.length)peer.write(head);if(upstreamHead.length)socket.write(upstreamHead);socket.pipe(peer).pipe(socket);socket.on('error',()=>peer.destroy());peer.on('error',()=>socket.destroy());});upstream.on('error',()=>socket.destroy());upstream.end();});
   await new Promise(yes=>proxy.listen(0,'127.0.0.1',yes));const origin='http://127.0.0.1:'+proxy.address().port;
   browser=await chromium.launch({executablePath:process.env.ELSEMESH_CHROMIUM_EXECUTABLE??process.env.ELSEMESH_BROWSER_EXECUTABLE??chromium.executablePath(),headless:true,args:['--no-sandbox']});
@@ -63,10 +75,13 @@ export async function runRepositorySessionAcceptance({evidenceDirectory=resolve(
   assert.notEqual(landscape.metadata.worldId,house.metadata.worldId);check('real landscape loaded through common source pipeline',{worldId:landscape.metadata.worldId,signs:landscape.signs.length});
   await owner.evaluate(()=>acceptance.load('house'));assert.equal(await owner.evaluate(()=>acceptance.host.overlay),null);assert.equal(await owner.evaluate(()=>acceptance.session.client),null);targetPort=a.port;await connect(owner,houseAdmission);await revision(owner,2);check('B to A requires explicit reconnect; no inherited authority');
   assert.equal(await owner.evaluate(()=>acceptance.exportDigest()),authoredExport);check('authored export bytes unchanged after runtime sessions');
-  for(const name of ['house','landscape'])assert.equal(await bytesDigest('/fast/world-repositories/'+name),originals[name]);
+  const finalDigests={};for(const name of ['house','landscape']){finalDigests[name]=await bytesDigest(resolve(repositoriesRoot,name));assert.equal(finalDigests[name],originals[name]);}
   assert.deepEqual(await owner.evaluate(()=>acceptance.host.getAuthoredProject().objects.filter(o=>o.kind==='neon-sign').map(o=>o.neon)),house.signs.map(s=>s.config));check('authored repository bytes and authored neon content unchanged');
-  const result={status:'PASS_BROWSER_PROTOCOL_HARNESS',scope:'Actual RepositorySession, WebCrypto identities, actual private authority and common repository source loader. Host getter/overlay stub; native rendering and actual host transition hooks require independent acceptance.',checks,identities:{owner:ownerIdentity.nodeId,member:memberIdentity.nodeId},repositoryDigests:originals,evidenceDirectory};
+  const result={status:'PASS_BROWSER_PROTOCOL_HARNESS',scope:'Actual RepositorySession, WebCrypto identities, actual private authority and common repository source loader. Host getter/overlay stub; native rendering and actual host transition hooks require independent acceptance.',checks,identities:{owner:ownerIdentity.nodeId,member:memberIdentity.nodeId},builderRoot:resolve(builderRoot),repositoriesRoot:resolve(repositoriesRoot),fixtureProvenance,repositoryDigests:originals,repositoryDigestsAfter:finalDigests,evidenceDirectory};
   await writeFile(resolve(evidenceDirectory,'report.json'),JSON.stringify(result,null,2));return result;
- }catch(error){await writeFile(resolve(evidenceDirectory,'failure.json'),JSON.stringify({status:'FAILED',message:error.message,stack:error.stack,checks},null,2));throw error;}finally{await browser?.close();for(const server of authorities)await server.close();if(proxy)await new Promise(yes=>proxy.close(yes));}
+ }catch(error){
+  if(fixtureEvidence.repositoriesRoot){fixtureEvidence.repositoryDigestsAfter={};for(const name of ['house','landscape'])try{fixtureEvidence.repositoryDigestsAfter[name]=await bytesDigest(resolve(fixtureEvidence.repositoriesRoot,name));}catch(digestError){fixtureEvidence.repositoryDigestsAfter[name]={error:digestError.message};}}
+  await writeFile(resolve(evidenceDirectory,'failure.json'),JSON.stringify({status:'FAILED',message:error.message,code:error.code,indeterminateCommit:error.indeterminateCommit,stack:error.stack,checks,...fixtureEvidence},null,2));throw error;
+ }finally{await browser?.close();for(const server of authorities)await server.close();if(proxy)await new Promise(yes=>proxy.close(yes));}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)console.log(JSON.stringify(await runRepositorySessionAcceptance(),null,2));

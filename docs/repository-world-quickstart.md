@@ -77,6 +77,28 @@ joining are not implemented. Traffic remains local visual content.
 
 See [current device, editor and test evidence and remaining limits](owner-implementation-status.md).
 
+## Repository session protocol acceptance
+
+`npm run test:worlds` includes a real Playwright browser and the private neon
+authority from the separate authoring repository. Set `ELSEMESH_BUILDER_ROOT`
+to that repository and `ELSEMESH_WORLD_REPOSITORIES_ROOT` to a directory containing
+packed `house/` and `landscape/` worlds, each with a neon sign. Install the normal
+Playwright dependency/browser or set `ELSEMESH_CHROMIUM_EXECUTABLE` (alternatively
+`ELSEMESH_BROWSER_EXECUTABLE`) to an installed compatible browser.
+
+The harness fails if required inputs or the actual authority are unavailable;
+it does not skip checks or substitute a mock. It records input digests before and
+after the run, including failures. An optional `session-fixtures.json` in the
+fixture root records provenance; label generated fixtures as `kind: "generated"`
+and do not describe them as historical originals. Without that file, provenance
+is recorded as externally supplied and unverified. Runtime authority state is
+written separately under `.local-evidence`, outside the engine repository.
+
+The external authority must support its own durable persistence operations on
+the host platform. Its directory `fsync` currently fails with `EPERM` on this
+Windows setup; that is an unresolved external integration failure. Passing this
+protocol harness does not qualify native rendering or real device transitions.
+
 ## Legacy networking entrypoints
 
 `tools/networking/repository-world-server.mjs` and its shared
