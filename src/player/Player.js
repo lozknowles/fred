@@ -2,6 +2,7 @@ import * as THREE from '../engine/index.js';
 import { WORLD } from '../world/WorldLayout.js';
 import { HOUSE } from '../world/boat/Wheelhouse.js';
 import { SPRAY } from '../fx/Spray.js';
+import { walkingBlockContact, updateWalkingBlock } from './WalkingBlockReason.js';
 
 const HOUSE_HELM = { x: HOUSE.helmX, z: HOUSE.seatZ };
 
@@ -39,7 +40,7 @@ const HELM_REACH = 0.75; // m from the helm seat to take the wheel
 //   boat : at the helm, driving; V toggles helm (1st person) / chase (3rd person) camera, E stands up
 export class Player {
 
-	constructor( { camera, input, terrain, colliders, query, boat, reef = null, audio = null, spray = null, cave = null, transit = null } ) {
+	constructor( { camera, input, terrain, colliders, query, boat, reef = null, audio = null, spray = null, cave = null, transit = null, walkingDiagnostics = false } ) {
 
 		this.camera = camera;
 		this.input = input;
@@ -76,6 +77,10 @@ export class Player {
 		this.slot = query.allocate( 'player', 1 );
 		this.prompt = null;
 		this.surface = 'sand';
+		this.walkingDiagnostics = walkingDiagnostics;
+		this._walkingAttempted = new THREE.Vector3();
+		this._walkingContacts = [];
+		this._recordWalkingContact = contact => this._walkingContacts.push( contact );
 
 		// boat cameras
 		this.orbitYaw = 0;
@@ -134,6 +139,7 @@ export class Player {
 	update( dt ) {
 
 		this.terrain.assertMovementMode?.( this.mode );
+		if ( this.mode !== 'walk' ) updateWalkingBlock( this, null, dt );
 
 		const inp = this.input;
 		this.query.setPoint( this.slot, this.position.x, this.position.z );
@@ -237,11 +243,15 @@ export class Player {
 		if ( this.cave ) this.cave.constrainPlayer( old, p );
 		// Measure a grounded step from the accepted feet height, before this frame's gravity.
 		const stepHeight = this.grounded ? 0.4 + Math.max( 0, old.y - p.y ) : 0.4;
-		this.colliders.resolveCapsule( p, RADIUS, HEIGHT, stepHeight );
+		const observing = this.walkingDiagnostics && wish.lengthSq() > .01;
+		if ( observing ) { this._walkingAttempted.copy( p ); this._walkingContacts.length = 0; }
+		this.colliders.resolveCapsule( p, RADIUS, HEIGHT, stepHeight, observing ? this._recordWalkingContact : null );
+		const solidBlock = observing ? walkingBlockContact( old, p, this._walkingAttempted, wish, this._walkingContacts ) : null;
         // Validate the FINAL displacement: solid resolution can push X/Z too.
         if ( this.terrain.constrainPlayer?.( old, p, { radius: RADIUS, height: HEIGHT, mode: this.mode } ) === false ) {
             this.velocity.x = 0; this.velocity.z = 0;
         }
+		updateWalkingBlock( this, solidBlock, dt );
 		if ( this.landOnBoat( old, p ) ) return;
 		const g = this.groundAt( p.x, p.z, p.y + 0.45 );
 		if ( p.y <= g ) {
