@@ -23,6 +23,7 @@ import {repositoryWorldActions} from './RepositoryWorldActions.js';
 import {WebGLRepositoryAvatar} from './WebGLRepositoryAvatar.js';
 import {createPortalEffects} from './RepositoryPortalEffects.js';
 import {AvatarChooser} from '../player/AvatarChooser.js';
+import {canSpeakAvatarKey} from '../player/AvatarVoice.js';
 import {nativeIslandSceneOptions,nativeIslandDiagnostics} from './NativeIslandIntegration.js';
 import {buildRepositoryScene,disposeRepositoryScene} from './RepositoryScene.js';
 import {loadAppearance} from '../player/AvatarAppearance.js';
@@ -201,6 +202,7 @@ async function init(){
  const canToggleView=()=>input.enabled&&!retro.active&&!terminal.open&&!media?.controlsOpen&&!avatarChooser.dialog.open&&!portals.pending&&!portals.authorityOffline;
  window.addEventListener('keydown',event=>{if(event.code==='KeyV'&&canToggleView())setFollow(!followCamera.enabled);});
  const touchGameplayReady=()=>!!host.active&&input.enabled&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!portals.pending&&!portals.authorityOffline&&!avatarChooser.dialog.open&&!app.freeCam&&!playerEyes?.panel.open&&!document.querySelector('dialog[open]');
+ window.addEventListener('keydown',event=>{if(canSpeakAvatarKey(event,touchGameplayReady()&&!graphics?.open)){event.preventDefault();void avatarChooser.speakVoice();}});
  input.bindTouchAction(document.querySelector('#touch-use'),{code:'KeyE',allowed:touchGameplayReady});
  input.bindTouchAction(document.querySelector('#touch-jump'),{code:'Space',hold:true,allowed:touchGameplayReady});
  input.bindTouchAction(document.querySelector('#touch-view'),{allowed:()=>touchGameplayReady()&&canToggleView(),onPress:()=>setFollow(!followCamera.enabled)});

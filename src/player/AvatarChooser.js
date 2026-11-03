@@ -1,4 +1,5 @@
 import { AVATAR_STYLES, loadAppearance, saveAppearance } from './AvatarAppearance.js';
+import { AvatarVoice, AVATAR_VOICE_LINES, loadAvatarVoiceLine, saveAvatarVoiceLine } from './AvatarVoice.js';
 import { loadFacePhoto, saveFacePhoto, removeFacePhoto, subscribeFacePhoto, decodeFacePhoto, encodeFacePhoto, loadFacePhotoImage } from './AvatarFacePhotoStore.js';
 
 const palettes = {
@@ -73,9 +74,12 @@ export class AvatarChooser {
 			this.dialog.querySelector('.elsemesh-avatar-fields').append(label,row);
 		}
 		this.createFaceEditor();
+		this.createVoiceEditor();
 		const unsubscribe=attachLocalFacePhotoStore(this);
 		const stop=event=>{
+			this.voice.stop();
 			if(event.persisted)return;
+			this.voice.dispose();
 			unsubscribe();
 			window.removeEventListener('pagehide',stop);
 		};
@@ -98,6 +102,7 @@ export class AvatarChooser {
 				});
 				this.faceOriginal=this.faceDraft; this.faceChanged=false;
 				this.value={...this.draft}; const saved=saveAppearance(this.value);
+				this.voiceLine=this.voiceSelect.value; saveAvatarVoiceLine(this.voiceLine);
 				this.name=this.nameInput.value.trim().replace(/[\x00-\x1f<>]/g,'').slice(0,24) || 'Explorer';
 				try { localStorage.setItem('elsemesh.avatar.name',this.name); } catch { /* Session-only name. */ }
 				if(app) app.player.displayName=this.name;
@@ -110,6 +115,24 @@ export class AvatarChooser {
 		this.dialog.querySelector('.cancel').onclick = () => this.close(false);
 		this.dialog.addEventListener('cancel',event => { event.preventDefault(); this.close(false); });
 	}
+	createVoiceEditor() {
+		this.voiceLine=loadAvatarVoiceLine();
+		const section=document.createElement('section'); section.setAttribute('aria-label','Avatar voice');
+		section.innerHTML=`<h3>Loz voice</h3><p>Choose a prepared line to speak here. Save avatar keeps your choice. Press J while exploring to speak it again. Sound plays in this browser.</p><label for="elsemesh-avatar-voice">Spoken line</label><select id="elsemesh-avatar-voice"></select><div class="elsemesh-avatar-actions"><button type="button" class="voice-speak">Speak</button><button type="button" class="voice-stop" disabled>Stop</button></div><p class="voice-status" role="status" aria-live="polite"></p>`;
+		this.voiceSelect=section.querySelector('select');
+		for(const line of AVATAR_VOICE_LINES)this.voiceSelect.add(new Option(line.label,line.id));
+		this.voiceSelect.value=this.voiceLine;
+		this.voice=new AvatarVoice({onState:({playing,message})=>{
+			section.querySelector('.voice-stop').disabled=!playing;
+			section.querySelector('.voice-status').textContent=message;
+		}});
+		section.querySelector('.voice-speak').onclick=()=>{void this.voice.speak(this.voiceSelect.value);};
+		section.querySelector('.voice-stop').onclick=()=>this.voice.stop();
+		this.voiceSelect.onchange=()=>this.voice.stop();
+		// Keep voice controls near the top on small screens, before photo editing.
+		this.dialog.querySelector('.elsemesh-avatar-fields').before(section);
+	}
+	speakVoice() {return this.voice.speak(this.voiceLine);}
 	createFaceEditor() {
 		const section=document.createElement('section'); section.setAttribute('aria-label','Local face photo');
 		section.innerHTML=`<h3>Face photo · this browser only</h3><p>Choose a clear front-facing portrait. Centre your face in the square and adjust the eyes and mouth on your character. This flat photo is applied to the front of the head. Face photos stay in this browser and are visible only on your own character.</p><label for="elsemesh-face-file">Local PNG, JPEG or WebP (up to 8 MB)</label><input id="elsemesh-face-file" type="file" accept="image/png,image/jpeg,image/webp"><canvas width="256" height="256" aria-label="Square photo crop preview" role="img" style="display:block;width:180px;height:180px;margin:12px 0;background:#173541"></canvas><p class="face-empty"></p><div class="face-controls"></div><button type="button" class="face-remove">Remove face photo</button>`;
@@ -175,6 +198,7 @@ export class AvatarChooser {
 	show() {
 		if(this.dialog.open || (this.app && (!this.app.input.enabled || !this.app.fly || !this.app.thirdIsland))) return;
 		this.draft={...this.value}; this.refresh(); this.status('');
+		this.voice.stop(); this.voiceSelect.value=this.voiceLine;
 		this.nameInput.value=this.name;
 		this.faceOriginal=loadFacePhoto(); this.faceDraft=this.faceOriginal; this.faceSource=null; this.faceChanged=false; this.faceBusy=false;
 		this.faceOptions={x:0,y:0,zoom:1,rotation:0};
@@ -194,6 +218,7 @@ export class AvatarChooser {
 	}
 	close(accepted) {
 		if(this.saving && !accepted) { this.status('Finishing your save. Please wait.'); return; }
+		this.voice.stop();
 		this.faceRevision++; this.faceBusy=false; this.faceSource=null;
 		if(!accepted) { this.app?.avatar.setAppearance(this.value)?.catch(()=>{}); this.faceDraft=this.faceOriginal; this.updateFacePreview(); }
 		this.dialog.close();
