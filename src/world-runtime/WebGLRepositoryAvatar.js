@@ -38,7 +38,7 @@ function customizeMaterial(material,appearance){
 export class WebGLRepositoryAvatar{
  constructor(scene,{prepareResources}={}){
   this.prepareResources=prepareResources;
-  this.scene=scene;this.group=new T.Group();this.group.name='ElseMesh_builtin_animated_explorer';scene.add(this.group);
+  this.scene=scene;this.group=new T.Group();this.group.name='Fred_builtin_animated_explorer';scene.add(this.group);
   this.appearance={...DEFAULT_APPEARANCE};this.version=0;this.disposed=false;this.cinematic=null;this.currentClip=null;this.materials=[];
   this.localFacePhoto=createLocalFacePhotoController({getTarget:()=>this.model?{model:this.model,asset:this.asset}:null,loadSource:avatarLODSource,createTexture:atlas=>webGLFaceTexture(T,atlas),bindTexture:bindWebGLFaceTexture});
   this.transportPresentation=createAvatarTransportPresentation({root:this.group,isWebGL:true,materialAdapter:createAvatarTransportMaterialAdapter(()=>this.materials,{isWebGL:true})});

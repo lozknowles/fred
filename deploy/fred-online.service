@@ -1,11 +1,11 @@
 [Unit]
-Description=ElseMesh ten-player room server
+Description=Fred ten-player room server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/elsemesh-online
+WorkingDirectory=%h/fred
 Environment=NODE_ENV=production
 EnvironmentFile=%h/.config/elsemesh/online.env
 ExecStart=/usr/bin/node tools/networking/online-server.mjs

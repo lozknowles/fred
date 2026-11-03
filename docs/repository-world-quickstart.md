@@ -1,11 +1,11 @@
 # Find and run repository worlds
 
-ElseMesh loads authored worlds from independent repositories. The repository-world player is the default game entry. The retired combined-island entry is no longer built or distributed.
+Fred loads authored worlds from independent repositories. The repository-world player is the default game entry. The retired combined-island entry is no longer built or distributed.
 
 ## Open the public warehouse
 
-**[Play Loz's warehouse island](https://lozknowles.github.io/ElseMesh/)** is the
-public warehouse snapshot. Download the complete bundled island from the [GitHub Releases page](https://github.com/lozknowles/ElseMesh/releases/latest).
+**[Play Loz's warehouse island](https://lozknowles.github.io/Fred/)** is the
+public warehouse snapshot. Download the complete bundled island from the [GitHub Releases page](https://github.com/lozknowles/Fred/releases/latest).
 
 Warehouse data lives in [the independent opening-island repository](https://github.com/lozknowles/elsemesh-world-loz-opening-island).
 The public warehouse is single-player. It does not connect to private owner

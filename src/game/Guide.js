@@ -67,7 +67,7 @@ const row = ( keys, text ) => `<div class="gm-guide-row"><span class="k">${ keys
 
 const CARDS = [
 	{
-		eyebrow: 'Welcome to ElseMesh',
+		eyebrow: 'Welcome to Fred',
 		title: 'Explore the island, find supplies and trade',
 		body: `<p>Search the shoreline for useful objects and clues. Press <b>J</b> or tap <b>Pick up</b> near a find, then open your bag with <b>I</b>. Find a fishing rod before you can fish. Watches, tools and lost phones can be used, dropped, sold or traded with another player.</p>
 			<p>Sell your catch to <b>Joe</b> at the general shop by the pier, then spend the credits on upgrades from <b>Marta</b> at the chandlery by the boathouse: stronger line, a faster reel, a bigger hold, a fish finder and lights for fishing at night.</p>`,

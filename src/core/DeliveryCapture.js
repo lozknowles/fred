@@ -14,7 +14,7 @@ export function recordDelivery(app, button) {
       recorder.onstop=()=>{
         for(const track of recorder.stream.getTracks())track.stop();
         const blob=new Blob(chunks,{type:recorder.mimeType}),url=URL.createObjectURL(blob),a=document.createElement('a');
-        a.href=url;a.download='ElseMesh-Sedan-Delivery.'+(recorder.mimeType.includes('mp4')?'mp4':'webm');a.click();
+        a.href=url;a.download='Fred-Sedan-Delivery.'+(recorder.mimeType.includes('mp4')?'mp4':'webm');a.click();
         setTimeout(()=>URL.revokeObjectURL(url),60000);button.disabled=false;button.textContent='Record sedan delivery';
       };
       recorder.start(1000);started=performance.now();

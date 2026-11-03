@@ -165,3 +165,34 @@ test('nested aperture must intersect the perspective opening, including tilted a
  assert.equal(portalApertureVisibleThrough(camera,rotatedOpening,rotated(inner(3))),false);
  assert.equal(portalApertureVisibleThrough(camera,rotatedOpening,rotated(inner(2.5,2.5))),true);
 });
+
+test('nested metadata and spent budget skip only preparation, retaining outer updates and aperture guards',()=>{
+ for(const shape of ['project','descriptor'])for(const routes of [[],[{id:'return',enabled:true}],[{id:'disabled',enabled:false}],[{id:'hidden',enabled:true,view:{enabled:false}}]]){
+  const {views,renderer:r}=setup(),root=new T.Group(),node=new T.Mesh(new T.PlaneGeometry(),new T.MeshBasicMaterial());node.material.userData.portalAperture=true;node.visible=false;root.add(node);
+  const candidate={root,...(shape==='project'?{project:{portals:routes}}:{descriptor:{project:{portals:routes}}})};
+  views.setDestination('a',{source:pose(),destination:{...pose([10,0,0]),id:'return'},candidate,ownsCandidate:false,authorizedView:true,state:'live'});
+  let traversals=0,updates=0,binds=0,neon=0,lod=0,draws=0;const traverse=root.traverse;root.traverse=function(callback){traversals++;return traverse.call(this,callback);};
+  root.userData.updateWebGL=()=>updates++;root.userData.updateNeon=()=>neon++;root.userData.updateTreeLOD=()=>lod++;candidate.nativeIsland={bindView:()=>binds++};
+  views.resolveNestedDestination=()=>assert.fail('ineligible route resolved');r.render=()=>{draws++;assert.equal(node.visible,false);};
+  views.render();assert.equal(traversals,2);assert.deepEqual([updates,binds,neon,lod,draws],[1,1,1,1,1]);assert.equal(node.visible,false);
+  node.visible=true;r.render=()=>{assert.equal(node.visible,false);throw Error('outer draw failed');};assert.throws(()=>views.render(),/outer draw failed/);assert.equal(node.visible,true);assert.equal(r.target.main,true);views.dispose();
+ }
+ const {views}=setup(),root=new T.Group();views.setDestination('a',{source:pose(),destination:pose([10,0,0]),candidate:{root,project:{portals:[{id:'eligible',enabled:true}]}},ownsCandidate:false,authorizedView:true,state:'live'});
+ views.resolveNestedDestination=()=>assert.fail('spent budget resolved');views.nestedDraws=views.maxViews;let traversals=0;const traverse=root.traverse;root.traverse=function(callback){traversals++;return traverse.call(this,callback);};views._drawWithNested(views.entries.get('a'),{width:512,height:288},0);assert.equal(traversals,2);views.dispose();
+});
+
+test('return-only metadata is re-read for dynamic aligned doors and keeps both second hops',()=>{
+ const {views,renderer:r}=setup({maxViews:3}),root=new T.Group(),exit={...pose([10,0,0]),id:'return'},project={portals:[{...exit,enabled:true}]},candidate={root,project,identity:{worldId:'B'}};
+ views.setDestination('a',{source:pose(),destination:exit,candidate,ownsCandidate:false,authorizedView:true,state:'live'});let draws=0,resolves=0;r.render=()=>draws++;views.resolveNestedDestination=()=>assert.fail('return resolved');views.render();assert.equal(draws,1);
+ views.resolveNestedDestination=({source})=>{resolves++;return {candidate:{root:new T.Group(),project:{portals:[{...pose([20,0,0]),id:'out',enabled:true,destination:{worldId:'B',portalId:source.id}}]}}};};
+ for(let i=0;i<2;i++){const source={...pose([10+(i? .2:0),0,3],Math.PI),id:'next-'+i,enabled:true,destination:{portalId:'out'}};project.portals.push(source);const node=new T.Mesh(new T.PlaneGeometry(),new T.MeshBasicMaterial());node.userData.portalAperture=true;node.userData.portalId=source.id;root.add(node);}
+ draws=0;views.render();assert.equal(resolves,2);assert.equal(draws,3);assert.equal(views.nestedDraws,2);views.dispose();
+});
+
+test('missing and malformed route metadata retains its existing lookup and error behavior',()=>{
+ for(const project of [undefined,{}, {portals:null},{portals:[null]}]){
+  const {views}=setup(),root=new T.Group(),node=new T.Group();node.userData.portalAperture=true;node.userData.portalId='door';root.add(node);
+  views.setDestination('a',{source:pose(),destination:pose([10,0,0]),candidate:{root,project},ownsCandidate:false,authorizedView:true,state:'live'});views.resolveNestedDestination=()=>assert.fail('missing route resolved');
+  if(project?.portals?.[0]===null)assert.throws(()=>views.render(),TypeError);else assert.doesNotThrow(()=>views.render());views.dispose();
+ }
+});

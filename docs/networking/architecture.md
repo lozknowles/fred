@@ -10,7 +10,7 @@ mandatory; the baseline is ordinary Internet/LAN connectivity and browser WSS.
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
-| ElseMesh federation | Stable WorldID/RegionID/PortalID, ownership and authority, discovery-record verification, portal destinations, player authentication, destination admission, versioned application messages and rules | Overlay membership, IP allocation, provider tokens, socket-specific game rules |
+| Fred federation | Stable WorldID/RegionID/PortalID, ownership and authority, discovery-record verification, portal destinations, player authentication, destination admission, versioned application messages and rules | Overlay membership, IP allocation, provider tokens, socket-specific game rules |
 | Network connectivity | Scoped reachable address candidates over public Internet, LAN, optional Tailscale/ZeroTier or another provider; configured ingress and relay paths | World identity, permission to enter, inventory or gameplay protocol translation |
 | Game transport | Browser WebSocket/WebRTC connections; later suitable native QUIC/UDP-library implementations; encryption, framing, delivery capabilities, bounded queues and connection health | World ownership, discovery policy, automatic admission or implicit compatibility between different games |
 
@@ -114,7 +114,7 @@ fresh signed record or one or more discovery locations. Bootstrap may also use a
 local address book, a configured static HTTPS manifest, or any independently
 self-hosted directory. Directory responses are untrusted until signatures are
 verified. A directory locates an owner; it cannot create ownership or admission.
-No central directory, overlay controller or vendor login is required by ElseMesh.
+No central directory, overlay controller or vendor login is required by Fred.
 An optional overlay may still require its own control plane.
 
 With a fresh trusted direct record and a reachable world, discovery services can
@@ -189,7 +189,7 @@ federation. Report the application path and any observed overlay path separately
 if direct-versus-relayed underlay information is unavailable, report unknown.
 
 Tailscale Serve is private-tailnet exposure; Funnel is an optional public ingress,
-not an ElseMesh dependency ([Tailscale documentation](https://tailscale.com/docs/features/tailscale-funnel)).
+not a Fred dependency ([Tailscale documentation](https://tailscale.com/docs/features/tailscale-funnel)).
 ZeroTier's controller manages network membership, not game access
 ([ZeroTier documentation](https://docs.zerotier.com/controller/)).
 
@@ -233,7 +233,7 @@ semantics ([RFC9221](https://www.rfc-editor.org/rfc/rfc9221)). WebTransport, if 
 considered, needs its own browser/server capability profile; it is not arbitrary
 native QUIC interoperability.
 
-Carrying identical ElseMesh messages over another transport is adaptation.
+Carrying identical Fred messages over another transport is adaptation.
 Connecting a different game protocol requires an explicit, versioned translator
 with defined mappings for identity, authority, rules, units, messages and state;
 reject unsupported semantics. A generic UDP tunnel or common overlay is not such
@@ -277,7 +277,7 @@ of public evidence. All rows below are **proposed acceptance tests**, except the
 | A — no overlay | Disable/remove all overlay dependencies. Two independently owned world services exchange advertised versioned messages over WSS, with distinct credentials. Verify direct invite/static-record discovery, allow and deny, reconnect, and unchanged solo play. |
 | B — ordinary browser | Supported desktop and phone browsers on an external network with no VPN; valid public WSS ingress. Authenticate, enter, see movement and reconnect. A GitHub Pages client needs explicit approved cross-origin endpoints: permitted server Origin, browser connect policy and CORS for HTTP record/asset fetches. Never replace the current exact-origin guard with wildcard access. |
 | C — LAN | Two hosts on the same LAN, no overlay/controller/Internet directory. Trusted local record and browser-compatible secure endpoint work. A private endpoint from an unrelated LAN fails; record browser local-network permission/TLS restrictions rather than disabling protections. |
-| D — optional Tailscale | Two authorised OS members with permitted network ACLs use the same ElseMesh application profile. No portal changes/provider API calls in core. Nonmember cannot use the private endpoint; can use a separately authorised public ingress if configured. Repeat destination denial despite membership. |
+| D — optional Tailscale | Two authorised OS members with permitted network ACLs use the same Fred application profile. No portal changes/provider API calls in core. Nonmember cannot use the private endpoint; can use a separately authorised public ingress if configured. Repeat destination denial despite membership. |
 | E — optional ZeroTier | Repeat D with authorised ZeroTier members and network rules. Revoke network membership: path fails, no world-ID change. World admission remains separate in both providers. |
 | F — destination denial/authentication | Valid overlay membership and source-signed handoff, but destination denies guest/player: no spawn or state disclosure. Reject forged, replayed, expired, revoked and wrong-audience grants/challenges. Denial cannot be bypassed using another endpoint. Test restart replay behaviour and identity mismatch. |
 | G — unreachable / mixed private networks | Advertise a tailnet-only endpoint to a ZeroTier-only client and an outside browser with no shared route. Bounded UNREACHABLE, no source departure/hang. Then add an explicit authorised public ingress or dual-reachable relay and verify every hop; remove a backend route and fail cleanly again. |
@@ -287,7 +287,7 @@ of public evidence. All rows below are **proposed acceptance tests**, except the
 | J — portal interruption | Denial, unsupported rules, load failure, cancellation and connection loss at each join stage preserve/recover source state where possible. Return portal works. No claim of atomic inventory transfer or single presence. Replica-only destination cannot grant active authority. |
 | K — self-hosted relay/gateway | Both endpoints behind inbound restrictions establish the documented outbound path through an independently hosted service. Verify ingress delegation, backend authentication, destination admission, bounded resource use, relay outage and truthful path reporting. Trusted gateway visibility is disclosed. |
 | L — transport semantics | Under controlled delay/loss/reorder, commands are ordered/idempotent or explicitly fail; latest-state never regresses, queues remain bounded, stale snapshots expire and reconnect resyncs. Compare WSS with WebRTC reliable and partial-reliable modes; mandatory datagram profile rejects WSS instead of falsely claiming equivalence. Exercise ICE direct and forced TURN, including relay failure. |
-| M — native and incompatible protocol | Real native endpoints exchange the same versioned ElseMesh semantics via the selected QUIC/UDP library with authenticated identities and measured limits. Browser reaches them only via implemented compatible browser transport/gateway. Unknown game protocol fails explicitly; a translator requires its own mappings and end-to-end tests. |
+| M — native and incompatible protocol | Real native endpoints exchange the same versioned Fred semantics via the selected QUIC/UDP library with authenticated identities and measured limits. Browser reaches them only via implemented compatible browser transport/gateway. Unknown game protocol fails explicitly; a translator requires its own mappings and end-to-end tests. |
 
 ## 8. Architecture gate record
 

@@ -58,6 +58,15 @@ export async function prepareRepositoryConfig(config,identity){
  }
  return {...config,worlds};
 }
+// Share wire bytes only within this synchronous broadcast: membership, pose and
+// transient presentation expiry are sampled again on every following broadcast.
+export function broadcastRepositoryPresence(federation,peers){
+ const messages=new Map();
+ for(const [node,peer] of peers){const s=federation.members.get(node);if(s)for(const worldId of s.views){
+  if(!messages.has(worldId))messages.set(worldId,JSON.stringify({type:'presence',worldId,players:federation.presence(worldId)}));
+  sendBounded(peer,messages.get(worldId));
+ }}
+}
 export async function createRepositoryWorldServer({root=resolve('dist'),config,identity,host='127.0.0.1',port=5201,publicOrigin=null,production=false}={}){
  const security=roomSecurity({host,publicOrigin,production});root=await realpath(root);config=await prepareRepositoryConfig(config,identity);const federation=new RepositoryFederation(config,identity),peers=new Map();
  const wss=new WebSocketServer({noServer:true,maxPayload:16384,perMessageDeflate:false});
@@ -67,12 +76,12 @@ export async function createRepositoryWorldServer({root=resolve('dist'),config,i
    const path=decodeURIComponent(url.pathname==='/'?'/worlds.html':url.pathname);check(!path.includes('\\'),'Invalid path');const file=await realpath(resolve(root,'.'+path)),rel=relative(root,file);check(rel&&!rel.startsWith('..')&&!rel.includes(':')&&!rel.split(/[\\/]/).some(p=>p.startsWith('.')),'Path denied');const info=await stat(file);check(info.isFile()&&info.size<MAX_FILE,'Invalid file');res.writeHead(200,{'Content-Type':types[extname(file)]??'application/octet-stream','Content-Length':info.size,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"frame-ancestors 'none'; base-uri 'self'; object-src 'none'"});if(req.method==='HEAD')res.end();else createReadStream(file).pipe(res);
   }catch{if(!res.headersSent)res.writeHead(404).end();else res.destroy();}
  });
- const broadcast=()=>{for(const [node,peer] of peers){const s=federation.members.get(node);if(s)for(const worldId of s.views)sendBounded(peer,JSON.stringify({type:'presence',worldId,players:federation.presence(worldId)}));}};
+ const broadcast=()=>broadcastRepositoryPresence(federation,peers);
  server.on('upgrade',(req,socket,head)=>{try{check(req.url==='/__worlds'&&security.accept(req,server.address().port),'Origin denied');check(wss.clients.size<64,'Server full');wss.handleUpgrade(req,socket,head,peer=>{
   let authenticated=null,busy=false,windowAt=Date.now(),count=0,statesAt=0,stateCount=0;const nonce=randomBytes(32).toString('hex'),expiresAt=Date.now()+10000,challenge=challengePayload(nonce,expiresAt);sendBounded(peer,JSON.stringify({type:'challenge',challenge}));const timeout=setTimeout(()=>peer.close(1008,'Authentication timeout'),10000);timeout.unref();peer.on('error',()=>peer.terminate());peer.alive=true;peer.on('pong',()=>peer.alive=true);
   peer.on('message',async(bytes,binary)=>{let packet;try{check(!binary,'Text required');packet=JSON.parse(bytes.toString());if(!authenticated){check(Date.now()<expiresAt&&packet.type==='authenticate'&&typeof packet.publicKey==='string'&&packet.publicKey.length<2000&&typeof packet.signature==='string'&&packet.signature.length<256,'Invalid identity proof');const node=nodeId(packet.publicKey);check(verify(null,Buffer.from(canonical(challenge)),packet.publicKey,Buffer.from(packet.signature,'base64')),'Identity proof failed');clearTimeout(timeout);check(!peers.has(node),'Identity already connected');if(!config.players?.[node]){sendBounded(peer,JSON.stringify({type:'pending',nodeId:node,message:'Pending operator enrolment'}));peer.close(1008,'Pending enrolment');return;}const s=federation.attach(node,packet.capabilities??FEDERATION_CAPABILITIES);authenticated=node;peers.set(node,peer);sendBounded(peer,JSON.stringify({type:'welcome',nodeId:node,playerId:s.playerId,label:s.label,worldId:s.worldId,sessionId:s.sessionId,generation:s.generation,nextSequence:s.sequence+1,appearance:s.appearance,position:s.position,velocity:s.velocity,yaw:s.yaw,world:federation.describe(s.worldId)}));broadcast();return;}
    const now=Date.now();if(now-windowAt>=1000){windowAt=now;count=0;}check(++count<=100,'Rate exceeded');
-   if(packet.type==='state'){if(now-statesAt>=1000){statesAt=now;stateCount=0;}if(++stateCount>20)return;federation.update(authenticated,packet);return;}
+   if(packet.type==='state'){if(now-statesAt>=1000){statesAt=now;stateCount=0;}if(++stateCount>20)return;federation.update(authenticated,packet,{includePresence:false});return;}
    check(!busy,'Request already pending');busy=true;let result;
    try{switch(packet.type){
     case 'subscribe':result=federation.subscribe(authenticated,packet.worldId,packet.portalId);break;

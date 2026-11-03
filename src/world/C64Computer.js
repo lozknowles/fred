@@ -37,7 +37,7 @@ export class C64Computer {
     this.dialog.querySelector('form').addEventListener('submit',event=>{event.preventDefault();const command=this.input.value;this.input.value='';this.enqueue(command);});
     this.dialog.querySelector('.elsemesh-c64-exit').onclick=()=>this.close();
     this.dialog.addEventListener('cancel',event=>{event.preventDefault();this.close();});
-    this.write('ELSEMESH WAREHOUSE NETWORK',true); this.write('COMMODORE 64 TERMINAL 01',true); this.write('',true); this.write('LOGIN:',true);
+    this.write('FRED WAREHOUSE NETWORK',true); this.write('COMMODORE 64 TERMINAL 01',true); this.write('',true); this.write('LOGIN:',true);
   }
   createInterpreter() {
     const generation=this.commandGeneration;

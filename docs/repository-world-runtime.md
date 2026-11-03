@@ -1,4 +1,4 @@
-# Repository worlds in the installed ElseMesh engine
+# Repository worlds in the installed Fred engine
 
 Open `index.html` for the repository-world runtime. `worlds.html` remains an alias used by existing owner applications. Repository mode constructs the actual `Engine`, `SceneRenderer`, `Input`, `Player` and native `Colliders`. It does not instantiate the default islands, boat or NetworkDemo.
 
@@ -10,7 +10,7 @@ Use **Open world folder** to select an external repository containing `world.jso
 
 The renderer conversions preserve object hierarchy, imported static GLB primitives/material slots and base color textures, material overrides, terrain and supported imagery, authored features, forest, neon and computers. Native rendering currently omits GLB normal, ORM, AO and emissive texture maps and reports those omissions. Collision is conservative world AABB derived from authored collision settings; transformed concave models do not acquire triangle collision. Doorways and stairs must be authored from separate appropriately collidable parts. This is not a physics hull generator.
 
-WASD walks with the existing ElseMesh Player controller; drag or arrows look, Space jumps, Shift runs. E within three metres of a computer opens its assigned neon controls. Offline power changes are an ephemeral overlay; authored repository content is not changed.
+WASD walks with the existing Fred Player controller; drag or arrows look, Space jumps, Shift runs. E within three metres of a computer opens its assigned neon controls. Offline power changes are an ephemeral overlay; authored repository content is not changed.
 
 A federated session requires an operator supplied trusted owner node ID plus a separate admission JSON file containing signed content binding and region proof. These are not read from the world repository. The installed session verifier authenticates the signatures and exact content digest before connecting the existing private neon client. The server must expose its existing endpoint at the same origin `/__private-neon`. Public identity display contains only the public node ID and public key. Session power/config/time overlays update presentation while `getAuthoredProject()` returns authored data.
 

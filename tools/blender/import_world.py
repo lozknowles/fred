@@ -79,7 +79,7 @@ bpy.context.scene.unit_settings.system = "METRIC"
 bpy.context.scene.unit_settings.scale_length = 1.0
 bpy.context.scene["elsemesh_world"] = root
 bpy.context.scene["elsemesh_import_step"] = step
-print(f"ElseMesh: imported {nx}x{ny} terrain preview from {root}")
+print(f"Fred: imported {nx}x{ny} terrain preview from {root}")
 out = arg("--save", "")
 if out:
     out = os.path.abspath(out)

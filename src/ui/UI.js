@@ -1,6 +1,6 @@
 import { icon, brandMark } from './icons.js';
 
-// ElseMesh UI: settings panel (tabs → folders → controls), HUD, help,
+// Fred UI: settings panel (tabs → folders → controls), HUD, help,
 // photo mode, start overlay and loader. Plain DOM, no dependencies.
 // All styling lives in ui.css (class prefix `tw-`).
 
@@ -1938,7 +1938,7 @@ export class UI {
 		this.sparkEl = stats.querySelector( '.tw-spark' );
 
 		const brand = h( 'div', 'tw-brand' );
-		brand.innerHTML = `${ brandMark() }<span class="tw-brand-name">ELSEMESH</span>`;
+		brand.innerHTML = `${ brandMark() }<span class="tw-brand-name">FRED</span>`;
 		this.locationEl = h( 'div', 'tw-location', { role: 'status', 'aria-label': 'Current location' } );
 		this.modeEl = h( 'div', 'tw-mode is-empty', { role: 'status' } );
 		this.modeIco = h( 'span', 'tw-mode-ico' );
@@ -2201,7 +2201,7 @@ export class UI {
 		el.innerHTML = `
 			<div class="tw-start-inner">
 				${ brandMark( 'tw-start-mark' ) }
-				<div class="tw-start-title">ELSEMESH</div>
+				<div class="tw-start-title">FRED</div>
 				<button type="button" class="tw-start-cta"><span class="tw-start-pulse" aria-hidden="true"></span>${ icon( 'mouse' ) }<span>Tap or click to explore</span></button>
 				<div class="tw-start-touch-hint">Left stick moves · right stick looks · tap action prompts</div>
 				<div class="tw-start-keys">

@@ -6,7 +6,7 @@ Worlds stay in independent repositories. `world.json` pins hashed components and
 
 `native-island/1` supplies original cell-centred terrain fields, original vegetation records and portable bark assets to installed rendering recipes. The engine reuses ElseMesh terrain CDLOD, instanced vegetation, near/far meshes, grass and ocean/refraction rendering. Plant records are flat instance data, not one scene object per plant. Fine terrain is streamed by visible/arrival tiles; owner physics admits a verified fine field. WebGL2 uses a reduced optical approximation and is not claimed identical to WebGPU.
 
-The editor design view currently edits a coarse terrain proxy. Those height edits do not modify the captured native fine fields. The ElseMesh graphics preview renders the captured resources. Save/open a repository snapshot to preserve its resource closure; standalone project JSON cannot embed it. Native full-resolution sculpting remains a limitation.
+The editor design view currently edits a coarse terrain proxy. Those height edits do not modify the captured native fine fields. The Fred graphics preview renders the captured resources. Save/open a repository snapshot to preserve its resource closure; standalone project JSON cannot embed it. Native full-resolution sculpting remains a limitation.
 
 ## Flat-screen TV
 

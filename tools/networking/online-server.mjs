@@ -196,5 +196,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
 	const speechProvider = await loadPrivateSpeechProvider(process.env.ELSEMESH_SPEECH_CONFIG);
 	const result = await createOnlineServer({ root, host: process.env.ELSEMESH_ONLINE_HOST || '127.0.0.1', port: Number(process.env.ELSEMESH_ONLINE_PORT || 5200), speechProvider,
 		publicOrigin: process.env.ELSEMESH_PUBLIC_ORIGIN || null, production: process.env.NODE_ENV === 'production' });
-	console.log(`ElseMesh online rooms listening at http://${result.address.address}:${result.address.port}`);
+	console.log(`Fred online rooms listening at http://${result.address.address}:${result.address.port}`);
 }

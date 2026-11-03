@@ -33,6 +33,16 @@ test('appearance rejects arbitrary URLs, extra fields and malformed colours with
  f.update(s.nodeId,packet);assert.deepEqual(s.appearance,appearance);
 });
 
+test('update keeps its roster return by default; state-only and signed updates skip roster work',()=>{
+ const {f,players,tick}=fixture(),s=f.attach(players[0].nodeId);
+ let calls=0;const original=f.presence.bind(f);f.presence=id=>{calls++;return original(id);};
+ const packet=()=>({worldId:s.worldId,generation:s.generation,sequence:s.sequence+1,timestamp:f.now(),position:s.position,velocity:[0,0,0],yaw:0});
+ tick(100);assert.deepEqual(f.update(s.nodeId,packet()),original(s.worldId));assert.equal(calls,1);
+ tick(100);assert.equal(f.update(s.nodeId,packet(),{includePresence:false}),undefined);assert.equal(calls,1);assert.equal(s.sequence,1);
+ tick(100);assert.equal(f.acceptedPose(s.nodeId,packet()).sequence,2);assert.equal(calls,1);
+ assert.throws(()=>f.update(s.nodeId,{...packet(),generation:100},{includePresence:false}),/Stale membership/);
+});
+
 test('authority signs one immutable presentation only after committed transfer',()=>{
  const {f,players,cross,tick,authority}=fixture(),s=f.attach(players[0].nodeId);assert.equal(f.presence(s.worldId)[0].presentation,undefined);cross(s.nodeId);const r=f.prepare(s.nodeId,'elsemesh-portal:door-alpha');assert.equal(r.presentation,undefined);f.ready(s.nodeId,r.id,r.contentDigest,r.epoch);f.issue(s.nodeId,r.id);const committed=f.commit(s.nodeId,r.id),p=committed.presentation;
  assert.equal(verifyObject(p,new Set([authority.nodeId])),true);assert.equal(p.playerNodeId,s.nodeId);assert.equal(p.destinationGeneration,s.generation);assert.equal(p.sourceWorldId,'world.alpha');assert.equal(p.destinationWorldId,'world.beta');assert.equal(p.transferId,r.id);assert.equal(p.expiresAt-p.committedAt,3000);assert.equal(p.handoff,undefined);assert.equal(p.sessionId,undefined);assert.deepEqual(f.status(s.nodeId,r.id).presentation,p);assert.deepEqual(f.commit(s.nodeId,r.id).presentation,p);assert.deepEqual(f.presence('world.beta')[0].presentation,p);

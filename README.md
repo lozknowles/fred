@@ -1,10 +1,12 @@
-# fred
+# Fred
 
-Private development repository for ElseMesh and Loz's Warehouse Island. The game engine is on [main](https://github.com/lozknowles/fred/tree/main) and the authored world is on [warehouse-world](https://github.com/lozknowles/fred/tree/warehouse-world). The public game continues to serve the last public release. [Play the public release](https://lozknowles.github.io/ElseMesh/).
+Fred is the private world engine and player for Loz's Warehouse Island. The game engine is on [main](https://github.com/lozknowles/fred/tree/main) and the authored world is on [warehouse-world](https://github.com/lozknowles/fred/tree/warehouse-world). The public game continues to serve the last public release. [Play the public release](https://lozknowles.github.io/ElseMesh/).
 
 To work on both components, clone this repository and create a sibling world checkout with `git worktree add ../opening-world warehouse-world`. Build the engine with `npm ci` and `npm run build`. The engine pins the exact world revision in `public/opening-world.json`. Package from a clean checkout of that revision using `tools/package-published-worlds.mjs`; its fourth argument is the previously shipped static site. Add `--fresh-origin` when building a new local preview that has no previously open tabs. It preserves the editor and licences while omitting historical application chunks. Original public branch and tag tips are preserved under the `archive/engine/` and `archive/warehouse/` namespaces.
 
-## Public edition
+Fred retains the existing `elsemesh.*` world and protocol identifiers, browser storage keys and `ELSEMESH_*` configuration names for compatibility with authored worlds, saved avatars and owner services.
+
+## Archived ElseMesh edition
 
 [Play the opening island](https://lozknowles.github.io/ElseMesh/) · [Download the complete island](https://github.com/lozknowles/ElseMesh/releases/latest) · [Browse the archived public world data](https://github.com/lozknowles/elsemesh-world-loz-opening-island) · [World builder](https://github.com/lozknowles/elsemesh-worlds)
 
@@ -18,9 +20,9 @@ WASD walks, mouse drag or arrow keys look, Shift runs, Space jumps, E uses nearb
 
 ## Source and world ownership
 
-This repository holds reusable rendering, physics, player controls, networking, federation and supported behaviour code. The authored warehouse island is in its [own repository](https://github.com/lozknowles/elsemesh-world-loz-warehouse); the [public opening snapshot](https://github.com/lozknowles/elsemesh-world-loz-opening-island) is a separate, immutable copy with its own attribution. The complete release archive bundles that snapshot for fast, reliable first launch. The world ID, repository commit and content digest are pinned in `opening-world.json` inside the archive. Editing a world never requires changing engine source.
+Fred holds reusable rendering, physics, player controls, networking, federation and supported behaviour code. The authored island is on the [warehouse-world branch](https://github.com/lozknowles/fred/tree/warehouse-world). Its [archived public snapshot](https://github.com/lozknowles/elsemesh-world-loz-opening-island) retains its own attribution. The complete release archive bundles that snapshot for fast, reliable first launch. The world ID, repository commit and content digest are pinned in `opening-world.json` inside the archive. Editing a world never requires changing engine source.
 
-The source code is in this repository. Run `npm ci && npm run dev` to work on the engine. The source configuration points to the pinned public world repository; the release archive instead bundles the same revision locally. For exact packaging and verification, see [public opening-world deployment](docs/public-opening-world.md).
+The source code is in this repository. Run `npm ci && npm run dev` to work on the engine. The source configuration points to a pinned commit of the private world branch; the release archive instead bundles the same revision locally. For exact packaging and verification, see [public opening-world deployment](docs/public-opening-world.md).
 
 The engine still contains shared modules needed to bring earlier gameplay into permissioned worlds. Their presence in the source does not make the retired combined game a launchable download. Git history remains available for audit.
 

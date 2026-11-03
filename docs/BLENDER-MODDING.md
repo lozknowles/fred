@@ -1,6 +1,6 @@
 # Blender / external world-editing workflow
 
-ElseMesh keeps its procedural JavaScript terrain as the authoritative runtime source, but it can now export a standard world-editing package for Blender and other tools.
+Fred keeps its procedural JavaScript terrain as the authoritative runtime source, but it can now export a standard world-editing package for Blender and other tools.
 
 ## Export the current island
 
@@ -41,7 +41,7 @@ Install Blender 4.x or newer, then run from the repository root:
 blender --python tools/blender/import_world.py -- \
   --world artifacts/world \
   --step 4 \
-  --save artifacts/blender/ElseMesh.blend
+  --save artifacts/blender/Fred.blend
 ```
 
 `--step 4` creates a manageable 4 m preview mesh. Use `--step 1` only when the full-resolution 2048 x 2048 mesh is really needed.
@@ -65,7 +65,7 @@ Keep cave work in the `ELSEMESH_Caves` collection. Recommended workflow:
 Export the cave collection with:
 
 ```sh
-blender ElseMesh.blend --background \
+blender Fred.blend --background \
   --python tools/blender/export_caves.py -- \
   --collection ELSEMESH_Caves \
   --out public/models/world/caves.glb

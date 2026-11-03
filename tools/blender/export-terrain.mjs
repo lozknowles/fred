@@ -88,6 +88,6 @@ features.push( {
 fs.writeFileSync( path.join( OUT, 'world-features.geojson' ),
 	JSON.stringify( { type: 'FeatureCollection', features }, null, 2 ) );
 
-console.log( `Exported ElseMesh terrain to ${ OUT }` );
+console.log( `Exported Fred terrain to ${ OUT }` );
 console.log( `height ${ min.toFixed( 2 ) } m .. ${ max.toFixed( 2 ) } m, ${ t.res }x${ t.res } @ ${ t.texel } m/texel` );
 console.log( 'Files: heightmap.png, heightmap.f32, masks, terrain.json, world-features.geojson' );

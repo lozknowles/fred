@@ -1,5 +1,5 @@
 {
-  "name": "elsemesh",
+  "name": "fred",
   "version": "0.2.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5189",
@@ -49,5 +49,5 @@
     "@sparkjsdev/spark": "2.4.0",
     "three": "0.180.0"
   },
-  "description": "ElseMesh reusable world engine and repository world player"
+  "description": "Fred world engine and repository world player"
 }

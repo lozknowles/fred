@@ -6,7 +6,7 @@ import {T} from './vendor/world-engine-contract.js';
 import {WebGLRepositoryAvatar} from './WebGLRepositoryAvatar.js';
 import {installWebGLPresentationLOD} from '../engine/render/PresentationLOD.js';
 
-// Established ElseMesh compatibility renderer, with repository content injected
+// Established Fred compatibility renderer, with repository content injected
 // through the validated host. Movement always uses the installed native Player.
 export function createWebGLRepositoryEngine(container){
  const canvas=document.createElement('canvas');canvas.tabIndex=0;container.append(canvas);
@@ -31,7 +31,7 @@ export function configureWebGLRepositoryScene(scene,candidate){
  candidate?.shiftingWorld?.configureScene(scene);
 }
 export function createWebGLRepositoryPeerLayer(scene,ownNodeId,prepareResources){
- const group=new T.Group();group.name='ElseMesh_animated_repository_peers';scene.add(group);const avatars=new Map(),warms=new Map();let at=0,packet={players:[]},disposed=false;
+ const group=new T.Group();group.name='Fred_animated_repository_peers';scene.add(group);const avatars=new Map(),warms=new Map();let at=0,packet={players:[]},disposed=false;
  const ensure=pose=>{if(disposed||pose.nodeId===ownNodeId)return null;let a=avatars.get(pose.nodeId);if(!a){if(avatars.size>=32){const old=[...avatars].filter(([id])=>!packet.players.some(p=>p.nodeId===id)).sort((a,b)=>(a[1].lastPresenceAt??0)-(b[1].lastPresenceAt??0))[0];if(!old)return null;old[1].dispose();avatars.delete(old[0]);warms.delete(old[0]);}a=new WebGLRepositoryAvatar(group,{prepareResources});a.group.userData.remotePlayerId=pose.playerId;a.group.visible=false;avatars.set(pose.nodeId,a);}return a;};
  return {group,avatars,get packet(){return packet;},get pendingPrewarms(){return [...warms.values()].filter(w=>!w.done).length;},accept(next){if(disposed)return;at=performance.now();packet=next;},
  prewarmKnownProfiles(poses){return Promise.all(poses.filter(p=>p.nodeId!==ownNodeId).map(p=>{const key=JSON.stringify(p.appearance??{}),old=warms.get(p.nodeId);if(old?.key===key)return old.promise;const a=ensure(p);if(!a)return false;const w={key,done:false};w.promise=Promise.resolve().then(()=>p.appearance?a.setAppearance(p.appearance):a.ready).then(()=>a.ready).then(()=>{if(!packet.players.some(q=>q.nodeId===p.nodeId))a.group.visible=false;return true;}).finally(()=>w.done=true);warms.set(p.nodeId,w);return w.promise;}));},

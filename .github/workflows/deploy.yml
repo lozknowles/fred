@@ -16,6 +16,8 @@ concurrency:
 
 jobs:
   build:
+    # This workflow packages the archived public edition from its public world repository.
+    if: github.repository == 'lozknowles/ElseMesh'
     runs-on: ubuntu-latest
     outputs:
       pages_build_type: ${{ steps.pages-mode.outputs.type }}

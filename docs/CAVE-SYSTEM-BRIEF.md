@@ -2,7 +2,7 @@
 
 Working name: **UNDERNEATH**
 
-This is the first large exploratory environment planned for ElseMesh.
+This is the first large exploratory environment planned for Fred.
 
 ## Player experience
 
@@ -51,7 +51,7 @@ The first qualification target is intentionally bounded:
 Atmosphere, puzzles, enemies, narrative, keys, door opening and procedural cave generation are follow-on work, not blockers for the first physical cave.
 ## Implementation principle
 
-Treat the cave as additive world geometry loaded by ElseMesh, not as a rewrite of `TerrainData`.
+Treat the cave as additive world geometry loaded by Fred, not as a rewrite of `TerrainData`.
 
 The procedural terrain remains the canonical exterior heightfield. Blender is the authoring environment for geometry that heightfields cannot represent: caves, overhangs, interiors, ruins, tunnels and constructed spaces.
 

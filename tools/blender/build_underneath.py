@@ -1,6 +1,6 @@
-"""Build the first UNDERNEATH cave in the imported ElseMesh scene.
+"""Build the first UNDERNEATH cave in the imported Fred scene.
 
-Open artifacts/blender/ElseMesh.blend, then run this file from Blender's
+Open artifacts/blender/Fred.blend, then run this file from Blender's
 Python Console (exec(compile(open(path).read(), path, 'exec'))).
 Coordinates in underneath-layout.json use the game's X/Y/Z axes.
 """
@@ -17,7 +17,7 @@ with open(os.path.join(HERE, "underneath-layout.json"), encoding="utf8") as f:
 
 parent = bpy.data.collections.get("ELSEMESH_Caves")
 if parent is None or bpy.data.objects.get("ELSEMESH_Terrain") is None:
-    raise RuntimeError("Import the ElseMesh world before building UNDERNEATH")
+    raise RuntimeError("Import the Fred world before building UNDERNEATH")
 
 for obj in list(bpy.data.objects):
     if obj.name.startswith("UN_"):
@@ -377,6 +377,6 @@ bpy.context.scene["elsemesh_world"] = os.path.join(ROOT, "artifacts", "world")
 bpy.context.scene["underneath_layout"] = os.path.join(HERE, "underneath-layout.json")
 bpy.context.scene.unit_settings.system = "METRIC"
 bpy.context.scene.unit_settings.scale_length = 1.0
-out = os.path.join(ROOT, "artifacts", "blender", "ElseMesh.blend")
+out = os.path.join(ROOT, "artifacts", "blender", "Fred.blend")
 bpy.ops.wm.save_as_mainfile(filepath=out)
 print("UNDERNEATH authored in ELSEMESH_Caves:", out)
