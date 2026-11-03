@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
 import {PublicPortalRuntime} from '../src/world-runtime/PublicPortalRuntime.js';
-import {WebGLPortalViews,portalTargetSize,portalDestinationPlane,webGLPortalInView,portalApertureIntersectsFrustum,portalApertureVisibleThrough} from '../src/world-runtime/WebGLPortalViews.js';
+import {WebGLPortalViews,portalTargetSize,portalDestinationPlane,webGLPortalInView,portalApertureIntersectsFrustum,portalApertureVisibleThrough,portalMappingMatrix} from '../src/world-runtime/WebGLPortalViews.js';
 const pose=(position=[0,0,0],yaw=0)=>({position,yaw,width:2,height:3});
 test('published runtime stage and live view use the cropped production WebGL material',async()=>{
  const {views,renderer,mainCamera}=setup(),worldA='elsemesh.world:A',worldB='elsemesh.world:B',id='elsemesh-portal:ab',exitId='elsemesh-portal:ba',digestA='a'.repeat(64),digestB='b'.repeat(64);
@@ -209,4 +209,23 @@ test('missing and malformed route metadata retains its existing lookup and error
   views.setDestination('a',{source:pose(),destination:pose([10,0,0]),candidate:{root,project},ownsCandidate:false,authorizedView:true,state:'live'});views.resolveNestedDestination=()=>assert.fail('missing route resolved');
   if(project?.portals?.length)assert.throws(()=>views.render(),TypeError);else assert.doesNotThrow(()=>views.render());views.dispose();
  }
+});
+test('splat parent clips nested bounds at its oblique destination plane without leaking depth projection to the child',()=>{
+ const {views,renderer:r,mainCamera}=setup();mainCamera.position.set(0,0,3);mainCamera.lookAt(0,0,0);mainCamera.updateMatrixWorld();
+ const yaw=Math.PI+.8,source={...pose([10,0,.2],yaw),width:1.5,height:1,id:'bc',enabled:true,destination:{worldId:'C',portalId:'cb'}},exit={...pose([20,0,0]),id:'cb',enabled:true,destination:{worldId:'B',portalId:'bc'}},root=new T.Group(),node=new T.Mesh(new T.PlaneGeometry(),new T.MeshBasicMaterial());node.userData.portalAperture=true;node.userData.portalId='bc';root.add(node);
+ const b={root,identity:{worldId:'B'},project:{portals:[source]},splatScene:{expectedToneMapping:0}},c={root:new T.Group(),identity:{worldId:'C'},project:{portals:[exit]}};
+ views.setDestination('ab',{source:pose(),destination:pose([10,0,0]),candidate:b,ownsCandidate:false,authorizedView:true,state:'live'});views.resolveNestedDestination=()=>({candidate:c});
+ let childProjection,childUv;r.render=(scene,camera)=>{if(scene!==views.entries.get('ab').scene){childProjection=camera.projectionMatrix.clone();childUv=new T.Vector3(...source.position).applyMatrix4(portalMappingMatrix(source,exit)).project(camera);}};
+ views.render({width:1600,height:900});const outer=views.entries.get('ab'),nested=views.nestedTargets[0];assert.ok(nested);assert.equal(outer.aperture.userData.portalViewState,'live');
+ // Independent pinhole projection and world-space polygon clipping oracle.
+ // Parent eye is (10,0,-3), looking +z. Its destination half-space is z>=.015.
+ const focal=1/Math.tan(65*Math.PI/360),outerW=focal*2/(6*1.6)+4/1600,outerH=focal*3/6+4/900,outerX=(1-outerW)/2,outerY=(1-outerH)/2;
+ const pinhole=p=>[(.5-(p.x-10)*focal/(2*1.6*(p.z+3))-outerX)/outerW,(.5+p.y*focal/(2*(p.z+3))-outerY)/outerH];
+ const corners=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([x,y])=>new T.Vector3(10+x*.75*Math.cos(yaw),y*.5,.2-x*.75*Math.sin(yaw))),clipped=[];
+ for(let i=0;i<corners.length;i++){const a=corners[i],b=corners[(i+1)%corners.length];if(a.z>=.015)clipped.push(a);if((a.z>=.015)!==(b.z>=.015))clipped.push(a.clone().lerp(b,(.015-a.z)/(b.z-a.z)));}
+ const bounds=polygon=>{const uv=polygon.map(pinhole),left=Math.max(0,Math.min(...uv.map(p=>p[0]))-2/outer.target.width),bottom=Math.max(0,Math.min(...uv.map(p=>p[1]))-2/outer.target.height),right=Math.min(1,Math.max(...uv.map(p=>p[0]))+2/outer.target.width),top=Math.min(1,Math.max(...uv.map(p=>p[1]))+2/outer.target.height);return [left,bottom,right-left,top-bottom];};
+ const expected=bounds(clipped),unclipped=bounds(corners),actual=nested.material.uniforms.viewRect.value.toArray();actual.forEach((v,i)=>assert.ok(Math.abs(v-expected[i])<1e-9,`${i}: ${v} != ${expected[i]}`));assert.ok(expected[2]<unclipped[2]-.05,'partial aperture crop must discard the parent-clipped region');
+ for(const index of [2,6,10,14])assert.ok(Math.abs(childProjection.elements[index]-mainCamera.projectionMatrix.elements[index])<1e-10,'parent oblique row leaked into unrelated child camera');assert.notEqual(outer.camera.projectionMatrix.elements[14],mainCamera.projectionMatrix.elements[14]);
+ const parentUv=pinhole(new T.Vector3(...source.position));assert.ok(Math.abs((childUv.x+1)/2-(parentUv[0]-expected[0])/expected[2])<1e-9);assert.ok(Math.abs((childUv.y+1)/2-(parentUv[1]-expected[1])/expected[3])<1e-9);
+ views.dispose();
 });

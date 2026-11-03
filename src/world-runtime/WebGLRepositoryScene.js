@@ -157,7 +157,7 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
     }
    });for(const object of objects)candidate.assets.push({objectId:object.id,primitives,kind,backend:'webgl2'});
   }
-  candidate.nativeIsland?.setPlantOccluders(candidate.depthOccluders);
+  candidate.nativeIsland?.setPlantOccluders(options.warehousePlantOcclusionAdmitted===true&&descriptor.worldId===warehouseDepthWorld?candidate.depthOccluders:[]);
   candidate.assetBatchCount=groups.size;if(!project.nativeIsland){candidate.forest=forest(project,matrices,time);root.add(candidate.forest);}
   const water=project.nativeIsland||project.splatScene?null:sea(project,time);if(water)root.add(water);
   for(const feature of project.features??[]){if(feature.visible===false)continue;for(const part of buildFeatureGeometry(feature,project)){const wet=['water','foam'].includes(part.semantic);root.add(new T.Mesh(part.geometry,standard(part.color,wet?{roughness:.22,transparent:true,opacity:.9,metalness:.1}:{})));}}

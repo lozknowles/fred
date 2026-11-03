@@ -205,7 +205,15 @@ export class WebGLPortalViews{
    const index=portals.findIndex(portal=>!portal||(portal.id!==e.destination.id&&portal.enabled&&portal.view?.enabled!==false));
    if(index<0)return drawWebGLPortal(outer);
   }
-  mapViewCamera(this.mainCamera,e.camera,e.source,e.destination);applyPortalViewCrop(e.camera,e.crop);
+  mapViewCamera(this.mainCamera,e.camera,e.source,e.destination);
+  // Visibility/bounds use precisely the parent pass's depth clipping. Its
+  // oblique row belongs to this destination and must not travel to the next.
+  let nestedSourceCamera=e.camera;
+  if(e.candidate.splatScene){
+   e.nestedMappingCamera??=new T.PerspectiveCamera();mapViewCamera(this.mainCamera,e.nestedMappingCamera,e.source,e.destination);applyPortalViewCrop(e.nestedMappingCamera,e.crop);nestedSourceCamera=e.nestedMappingCamera;
+   applyPortalObliqueProjection(e.camera,e.destination);
+  }
+  applyPortalViewCrop(e.camera,e.crop);
   const visibleApertures=new Set(),restores=[],worldId=candidateWorldId(e.candidate);
   // A direct owner grant through another door does not authorize this viewpoint.
   try{
@@ -232,7 +240,7 @@ export class WebGLPortalViews{
     nested.target.setSize(nestedWidth,nestedHeight);setPortalSample(nested.material,nestedCrop,size.width,size.height);nested.material.uniforms.portalState.value=PORTAL_VIEW_STATES.live;
     if(nested.material.toneMapped!==!candidate.splatScene){nested.material.toneMapped=!candidate.splatScene;nested.material.needsUpdate=true;}
     // This pass hides every aperture, so cycles and render-target feedback stop.
-    drawPortalView({renderer:this.renderer,sourceCamera:e.camera,camera:nested.camera,source,destination,scene,candidate,target:nested.target,width:nestedWidth,height:nestedHeight,time,ordinaryToneMapping:this.ordinaryToneMapping,crop:nestedCrop});
+    drawPortalView({renderer:this.renderer,sourceCamera:nestedSourceCamera,camera:nested.camera,source,destination,scene,candidate,target:nested.target,width:nestedWidth,height:nestedHeight,time,ordinaryToneMapping:this.ordinaryToneMapping,crop:nestedCrop});
     restores.push([node,node.material]);node.material=nested.material;visibleApertures.add(node);
     }catch(error){e.nestedError=String(error?.message??error);}
     finally{detachRoot?.removeFromParent();}

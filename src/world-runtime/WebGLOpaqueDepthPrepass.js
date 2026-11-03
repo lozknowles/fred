@@ -9,6 +9,12 @@ const QUALIFIED_WAREHOUSE_CONTENT_DIGEST='fcba18b28ac9b8bf7ef52a1fc8ba0d3dc489d0
 const CANDIDATE_WAREHOUSE_CONTENT_DIGEST='78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b';
 const CANDIDATE_RENDERER='ANGLE (Intel, Intel(R) Arc(TM) Graphics (0x00007D55) Direct3D11 vs_5_0 ps_5_0, D3D11)';
 
+/** CPU triangle proof is device independent, but its source cache and local
+ * optical qualification cover only this exact authored Fred package. */
+export function isQualifiedWarehousePlantOcclusion(identity){
+ return identity?.worldId===QUALIFIED_WAREHOUSE_WORLD_ID&&identity.contentDigest===CANDIDATE_WAREHOUSE_CONTENT_DIGEST;
+}
+
 export function getQualifiedWarehouseDepthOccluders(active){
  if(!active||active.disposed||active.identity?.worldId!==QUALIFIED_WAREHOUSE_WORLD_ID||
   active.identity.contentDigest!==QUALIFIED_WAREHOUSE_CONTENT_DIGEST)return [];

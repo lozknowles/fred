@@ -44,6 +44,12 @@ The authorised release is a normal source push to main with [skip ci] in each re
 
 Local qualification and the replacement video are complete within these disclosed limits. The completion review and decision are recorded in repository-portals-plan.md. Remote publication is a separate explicitly authorised step; this document does not claim a new public deployment.
 
+## Fred graphics controls
+
+Open **Menu (M)** and select **Auto native · target 30 FPS** to let Fred try a sharper main image when recent frames leave enough time. It starts at up to one million pixels and can rise to the display's native pixel count, up to the pixel count of 2560 × 1440. A slower trial restores the previous resolution. Standard and previously saved manual settings keep their selected limits.
+
+Portal previews use the visible doorway's screen area and the selected portal detail limit. Nested previews still require an authorized destination. Warehouse tree visibility uses only verified solid wall geometry and keeps an uncertain tree visible.
+
 ## Runtime Graphics menu qualification — 28 October 2026
 
 The public repository player now has a Graphics button. Changes apply without a reload:

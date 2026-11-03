@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
-import {createQualifiedWarehouseDepthOccluderProvider,getQualifiedWarehouseDepthOccluders,isEligibleWebGLDepthOccluder,renderWebGLOpaqueDepthPrepass} from '../src/world-runtime/WebGLOpaqueDepthPrepass.js';
+import {createQualifiedWarehouseDepthOccluderProvider,getQualifiedWarehouseDepthOccluders,isEligibleWebGLDepthOccluder,isQualifiedWarehousePlantOcclusion,renderWebGLOpaqueDepthPrepass} from '../src/world-runtime/WebGLOpaqueDepthPrepass.js';
+import {repositorySceneOptions} from '../src/world-runtime/RepositorySceneOptions.js';
 import {updateWebGLWeatherShelter} from '../src/world-runtime/WebGLWeatherShelter.js';
 import {webGLRepositoryReadinessSignature} from '../src/world-runtime/WebGLRepositoryReadiness.js';
 
@@ -18,6 +19,19 @@ function fixture(){
 
 const qualifiedIdentity={worldId:'elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319',contentDigest:'fcba18b28ac9b8bf7ef52a1fc8ba0d3dc489d0bd4c94c651cdc559a7617a0e5d'};
 const candidateIdentity={...qualifiedIdentity,contentDigest:'78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b'},arcRenderer='ANGLE (Intel, Intel(R) Arc(TM) Graphics (0x00007D55) Direct3D11 vs_5_0 ps_5_0, D3D11)';
+
+test('plant proof admission requires exact authored Fred identity independently of the GPU grant',()=>{
+ const project={nativeIsland:{}},nativeIslandRead=async()=>{},camera=new T.PerspectiveCamera();
+ for(const identity of [candidateIdentity,qualifiedIdentity,undefined,{}, {...candidateIdentity,contentDigest:'changed'}, {...candidateIdentity,worldId:'foreign'}]){
+  const admitted=identity===candidateIdentity;
+  assert.equal(isQualifiedWarehousePlantOcclusion(identity),admitted);
+  const options=repositorySceneOptions(project,{nativeIslandRead,identity},{backend:'webgl2',camera});
+  assert.equal(options.warehousePlantOcclusionAdmitted,admitted);
+  assert.equal(options.nativeIsland.mainCamera,camera);
+ }
+ const options=repositorySceneOptions(project,{nativeIslandRead,identity:candidateIdentity},{backend:'webgpu',camera});
+ assert.equal(options.warehousePlantOcclusionAdmitted,undefined,'native GPU rendering receives no WebGL proof grant');
+});
 function device(renderer,identity=arcRenderer){let queries=0,contexts=0;const canvas=new EventTarget(),gl={getExtension:()=>({UNMASKED_RENDERER_WEBGL:1}),isContextLost:()=>false,getParameter(){queries++;return identity;}};renderer.domElement=canvas;renderer.getContext=()=>{contexts++;return gl;};return {gl,canvas,counts:()=>({queries,contexts})};}
 
 test('current Warehouse candidate requires the exact measured Arc device, queried once per provider',()=>{
