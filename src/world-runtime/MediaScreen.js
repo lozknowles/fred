@@ -458,11 +458,35 @@ export class MediaScreen {
   this.onExit();
   if(!this.iframe){this.releaseSightTiles();this.active=null;this.status.state='closed';}
  }
- current(){
+ // This lease check is deliberately independent of projection, terrain leases,
+ // and occlusion. Player events and the heartbeat must not compete with audio.
+ playbackContext(){
   const c=this.getContext(),a=this.active;
   if(!a||!c?.ready||c.active!==a.active||c.key!==a.key||!this.isAuthorized(a.object.id,'media.play'))return null;
   const matrix=c.objectMatrix?.(a.object.id)??a.active.matrices?.get(a.object.id);
   if(!matrix)return null;
+  return {c,matrix};
+ }
+ validatePlayback(){
+  if(this.doc.visibilityState==='hidden'){this.visibility();return false;}
+  if(!this.playbackContext()){this.exit();return false;}
+  return true;
+ }
+ heartbeat(){
+  if(!this.iframe||!this.validatePlayback())return;
+  // A stopped render loop cannot keep an old positive visual proof on screen.
+  // Hide only the picture; the existing player and its audio keep advancing.
+  if(performance.now()-this.lastVisualAt>1000){
+   this.screenVisible=false;this.screenPartial=false;
+   this.iframe.style.opacity='0';this.iframe.style.pointerEvents='none';
+  }
+  this.send({event:'listening',id:'elsemesh-tv',channel:'elsemesh-tv'});
+  this.send({event:'command',func:'addEventListener',args:['onStateChange']});
+  this.send({event:'command',func:'addEventListener',args:['onError']});
+ }
+ current(){
+  const lease=this.playbackContext();if(!lease)return null;
+  const {c,matrix}=lease,a=this.active;
   const projection=projectMediaScreen(c.camera,matrix,a.object.mediaScreen,c.viewport);
   const ready=this.ensureSightTiles(projection,a.active);
   const result=projection&&ready?this.isUnobstructed(projection,c,a.object):false;
@@ -489,14 +513,14 @@ export class MediaScreen {
   this.iframe=frame;this.doc.body.append(frame);this.screenVisible=current.visible;this.screenPartial=!!current.partial;
   this.status.state='player-requested';this.status.error=null;this.status.playerState=null;this.status.advancedSeconds=0;
   if(this.note)this.note.textContent=current.visible?'TV player is starting. Use the player controls if autoplay is blocked.':'TV player is starting behind an obstruction; the picture will reappear when visible.';
-  this.poll=setInterval(()=>{this.update();this.send({event:'listening',id:'elsemesh-tv',channel:'elsemesh-tv'});this.send({event:'command',func:'addEventListener',args:['onStateChange']});this.send({event:'command',func:'addEventListener',args:['onError']});},500);
+  this.poll=setInterval(()=>this.heartbeat(),500);
   this.update();
   return true;
  }
  send(value){this.iframe?.contentWindow?.postMessage(JSON.stringify(value),'https://www.youtube-nocookie.com');}
  receive(event){
-  if(this.iframe&&!this.current()){this.exit();return;}
   if(!this.iframe||event.source!==this.iframe.contentWindow||event.origin!=='https://www.youtube-nocookie.com')return;
+  if(!this.validatePlayback())return;
   let data;try{if(typeof event.data==='string'&&event.data.length>100000)return;data=typeof event.data==='string'?JSON.parse(event.data):event.data;}catch{return;}
   if(!data||typeof data!=='object')return;
   if(data.event==='onError'){this.status.error=data.info;this.status.state='playback-error';if(this.note)this.note.textContent=errors[data.info]??'YouTube playback failed.';return;}
@@ -516,6 +540,7 @@ export class MediaScreen {
   const current=this.current();
   if(!current){this.exit();return;}
   if(!this.iframe)return;
+  this.lastVisualAt=performance.now();
   if(this.sightError){if(this.note)this.note.textContent=this.sightError+' Use the TV play control to retry.';if(this.play)this.play.textContent=this.iframe?'Restart TV':'Retry TV';}
   this.screenVisible=current.visible;this.screenPartial=!!current.partial;
   this.iframe.style.opacity=current.visible?'1':'0';

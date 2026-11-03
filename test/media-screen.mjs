@@ -422,3 +422,44 @@ test('complex scenes retain whole-clear shortcut and safe legacy cells on polygo
  const prop={min:[-.4,-.4,-2.6],max:[.4,.4,-2.4]},fallback=mediaScreenCellVisibility(f.projection,f.camera,Array(4097).fill(prop),{complete:true});
  assert.equal(fallback.visible,true);assert.equal(fallback.maskFallback,'proven-clear-grid');assert.ok(fallback.clearCells>0&&fallback.clearCells<24);assert.match(decodeURIComponent(fallback.mask),/<rect /);
 });
+
+test('genuine events and heartbeat validate playback without collecting visual geometry; forged and stale events are cheap',()=>{
+ const f=fixture(),dom=fakeDOM();let proofs=0,contexts=0;
+ const manager=new MediaScreen({getContext:()=>{contexts++;return {ready:true,active:f.active,key:'session',camera:f.camera,viewport:f.viewport};},isAuthorized:()=>true,isUnobstructed:()=>{proofs++;return true;},document:dom.doc,window:dom.win});
+ try{
+  manager.enter({id:'tv',mediaScreen:config},f.active);manager.startPlayback();const old=manager.iframe;manager.startPlayback();const frame=manager.iframe;
+  proofs=0;contexts=0;dom.messages.length=0;
+  const packet={source:frame.contentWindow,origin:'https://www.youtube-nocookie.com',data:{event:'infoDelivery',info:{playerState:1,currentTime:5}}};
+  manager.receive({...packet,origin:'https://forged.test'});manager.receive({...packet,source:old.contentWindow});
+  assert.equal(contexts,0,'reject foreign origin/old player before any lease work');assert.equal(manager.status.currentTime,null);
+  manager.receive(packet);manager.heartbeat();assert.equal(proofs,0);assert.equal(contexts,2);assert.equal(manager.status.currentTime,5);assert.equal(manager.iframe,frame);
+  assert.equal(dom.messages.some(([data])=>/pauseVideo|setVolume|setPlaybackRate/.test(data)),false);
+ }finally{manager.dispose();}
+});
+test('heartbeat independently revokes ready, world, generation, permission and deleted-object leases while rendering is stopped',()=>{
+ for(const revoke of ['ready','world','generation','permission','matrix']){
+  const f=fixture(),dom=fakeDOM();let ready=true,active=f.active,key='session',allowed=true,proofs=0;
+  const manager=new MediaScreen({getContext:()=>({ready,active,key,camera:f.camera,viewport:f.viewport}),isAuthorized:()=>allowed,isUnobstructed:()=>{proofs++;return true;},document:dom.doc,window:dom.win});
+  try{
+   manager.enter({id:'tv',mediaScreen:config},f.active);manager.startPlayback();const frame=manager.iframe;proofs=0;
+   if(revoke==='ready')ready=false;if(revoke==='world')active={};if(revoke==='generation')key='new-generation';if(revoke==='permission')allowed=false;if(revoke==='matrix')f.active.matrices.delete('tv');
+   manager.heartbeat();assert.equal(proofs,0,revoke);assert.equal(manager.iframe,null,revoke);assert.equal(frame.src,'about:blank');assert.equal(frame.removed,true);
+  }finally{manager.dispose();}
+ }
+});
+test('covered, partial, stale-render and clear picture preserve one advancing player without pause, seek, volume or rate changes',()=>{
+ const f=fixture(),dom=fakeDOM();let visual={visible:true,partial:false,mask:null},proofs=0;
+ const manager=new MediaScreen({getContext:()=>({ready:true,active:f.active,key:'session',camera:f.camera,viewport:f.viewport}),isAuthorized:()=>true,isUnobstructed:()=>{proofs++;return visual;},document:dom.doc,window:dom.win});
+ try{
+  manager.enter({id:'tv',mediaScreen:config},f.active);manager.startPlayback();const frame=manager.iframe,src=frame.src;
+  const packet=time=>({source:frame.contentWindow,origin:'https://www.youtube-nocookie.com',data:{event:'infoDelivery',info:{playerState:1,currentTime:time}}});
+  dom.messages.length=0;manager.receive(packet(1));
+  for(const [time,state]of [[2,{visible:false,partial:false,mask:null}],[3,{visible:true,partial:true,mask:'test-mask'}],[4,{visible:true,partial:false,mask:null}]]){
+   visual=state;manager.update();assert.equal(frame.style.opacity,state.visible?'1':'0');const count=proofs;manager.receive(packet(time));manager.heartbeat();assert.equal(proofs,count);assert.equal(manager.iframe,frame);assert.equal(frame.src,src);
+  }
+  manager.lastVisualAt=performance.now()-1100;const count=proofs;manager.heartbeat();assert.equal(frame.style.opacity,'0');assert.equal(frame.style.pointerEvents,'none');assert.equal(proofs,count);manager.receive(packet(5));
+  manager.update();assert.equal(frame.style.opacity,'1');assert.equal(manager.iframe,frame);assert.equal(manager.status.advancedSeconds,4);
+  assert.equal(dom.messages.some(([data])=>/pauseVideo|seekTo|setVolume|setPlaybackRate/.test(data)),false);
+  dom.doc.visibilityState='hidden';manager.heartbeat();assert.equal(manager.iframe,null);assert.equal(manager.status.state,'hidden-stopped');
+ }finally{manager.dispose();}
+});
