@@ -1,5 +1,12 @@
 import {T} from './vendor/world-engine-contract.js';
+import {isQualifiedWarehousePlantOcclusion} from './WebGLOpaqueDepthPrepass.js';
+import {SHIFT_WORLD_ID, SHIFT_CONTENT_DIGEST} from './ShiftingWorldProfile.js';
 import {withWebGLPortalRenderState} from './WebGLPortalViews.js';
+
+export function isQualifiedFirstTripPackage(kind,identity){
+ return kind==='published' && (isQualifiedWarehousePlantOcclusion(identity) ||
+  (identity?.worldId===SHIFT_WORLD_ID && identity.contentDigest===SHIFT_CONTENT_DIGEST));
+}
 
 /** Start compilation in the real pass signature without drawing repository
  * content. Three's compileAsync does not initialize its private clipping state;

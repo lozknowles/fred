@@ -24,3 +24,14 @@ test('main signature compiles on the default framebuffer while clipping initiali
 test('synchronous compilation failure restores renderer state',()=>{
  const f=fixture();f.renderer.compileAsync=()=>{throw Error('compile failure');};assert.throws(()=>compileWebGLRepositoryPass({...f,targetScene:f.scene}),/compile failure/);assert.equal(f.renderer.target,f.savedTarget);assert.equal(f.renderer.xr.enabled,true);assert.equal(f.renderer.scissorTest,true);
 });
+
+test('only the two pinned published world packages opt into first-trip preparation', async()=>{
+ const {isQualifiedFirstTripPackage}=await import('../src/world-runtime/WebGLRepositoryPrograms.js');
+ const {SHIFT_WORLD_ID,SHIFT_CONTENT_DIGEST,SHIFT_WAREHOUSE_CONTENT_DIGEST}=await import('../src/world-runtime/ShiftingWorldProfile.js');
+ const warehouse='elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319';
+ assert.ok(isQualifiedFirstTripPackage('published',{worldId:warehouse,contentDigest:SHIFT_WAREHOUSE_CONTENT_DIGEST}));
+ assert.ok(isQualifiedFirstTripPackage('published',{worldId:SHIFT_WORLD_ID,contentDigest:SHIFT_CONTENT_DIGEST}));
+ assert.equal(isQualifiedFirstTripPackage('network',{worldId:SHIFT_WORLD_ID,contentDigest:SHIFT_CONTENT_DIGEST}),false);
+ assert.equal(isQualifiedFirstTripPackage('published',{worldId:warehouse,contentDigest:'edited'}),false);
+ assert.equal(isQualifiedFirstTripPackage('published',{worldId:'unrelated',contentDigest:SHIFT_WAREHOUSE_CONTENT_DIGEST}),false);
+});
