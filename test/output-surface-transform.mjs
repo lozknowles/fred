@@ -67,7 +67,8 @@ async function fixture(t){
 
 test('publication packaging explicitly copies and byte-preserves derivative manifest and chunk closure',async t=>{
  const {build,output,emitted,manifest}=await fixture(t),metadata=await packageOutputSurfaceDerivative(build,output);assert.equal(metadata.manifest,outputSurfaceManifestName);assert.equal(metadata.sha256,sha(emitted.source));assert.equal(metadata.upstreamSourceSha256,inputSha256);assert.equal(metadata.transformedModuleSha256,qualifiedModuleSha);assert.deepEqual(metadata.finalChunks,manifest.finalChunks);assert.equal(await fs.readFile(path.join(output,outputSurfaceManifestName),'utf8'),emitted.source);assert.deepEqual(await packageOutputSurfaceDerivative(build,output),metadata);
- const script=await fs.readFile(path.join(root,'tools/package-published-worlds.mjs'),'utf8');assert.match(script,/await packageOutputSurfaceDerivative\(build,output\)/);assert.match(script,/schema:'elsemesh\.publication\/1',outputSurfaceDerivative,/);
+ const script=await fs.readFile(path.join(root,'tools/package-published-worlds.mjs'),'utf8');assert.match(script,/await packageOutputSurfaceDerivative\(build,output\)/);const publicationFields=script.match(/schema:'elsemesh\.publication\/1',([^}]+)/)?.[1];
+ assert.ok(publicationFields?.split(',').includes('outputSurfaceDerivative'),'publication carries the verified build derivative');
 });
 
 test('packaging rejects changed or missing copied chunks',async t=>{
