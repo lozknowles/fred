@@ -1,6 +1,12 @@
-# ElseMesh — Loz's Warehouse Island
+# fred
 
-[Play the opening island](https://lozknowles.github.io/ElseMesh/) · [Download the complete island](https://github.com/lozknowles/ElseMesh/releases/latest) · [Edit the public world data](https://github.com/lozknowles/elsemesh-world-loz-opening-island) · [World builder](https://github.com/lozknowles/elsemesh-worlds)
+Private development repository for ElseMesh and Loz's Warehouse Island. The game engine is on [main](https://github.com/lozknowles/fred/tree/main) and the authored world is on [warehouse-world](https://github.com/lozknowles/fred/tree/warehouse-world). The public game continues to serve the last public release. [Play the public release](https://lozknowles.github.io/ElseMesh/).
+
+To work on both components, clone this repository and create a sibling world checkout with `git worktree add ../opening-world warehouse-world`. Build the engine with `npm ci` and `npm run build`. The engine pins the exact world revision in `public/opening-world.json`. Package from a clean checkout of that revision using `tools/package-published-worlds.mjs`; its fourth argument is the previously shipped static site. Fresh builds of this private source are local. Original public branch and tag tips are preserved under the `archive/engine/` and `archive/warehouse/` namespaces.
+
+## Public edition
+
+[Play the opening island](https://lozknowles.github.io/ElseMesh/) · [Download the complete island](https://github.com/lozknowles/ElseMesh/releases/latest) · [Browse the archived public world data](https://github.com/lozknowles/elsemesh-world-loz-opening-island) · [World builder](https://github.com/lozknowles/elsemesh-worlds)
 
 The default game opens Loz's warehouse island: beaches, sea, mountains, the warehouse, portal, computers and a large TV. The opening picture depicts this world. The retired combined-island game is not a launch option or part of the downloadable play package.
 
