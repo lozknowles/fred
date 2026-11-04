@@ -21,27 +21,64 @@ def sandbox_command(socket_path,provider,scope,probe=None):
     else:args+=['/usr/bin/python3','/opt/fred-ai/ai-terminal-inner.py',provider]
     return args
 
+def scope_empty(scope):
+    try:
+        result=subprocess.run(['/usr/bin/systemctl','--user','show',scope+'.scope','-p','LoadState','-p','ActiveState','-p','ControlGroup'],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,timeout=1)
+        values=dict(line.split('=',1) for line in result.stdout.splitlines() if '=' in line)
+        if values.get('LoadState')=='not-found' and values.get('ActiveState')=='inactive':return True
+        group=values.get('ControlGroup','')
+        if values.get('ActiveState') not in ('inactive','failed'):return False
+        if group:
+            path=pathlib.Path('/sys/fs/cgroup')/group.lstrip('/')
+            if path.exists() and (path/'cgroup.procs').read_text().strip():return False
+        return bool(values)
+    except (OSError,subprocess.TimeoutExpired):return False
+
 def cleanup_scope(scope):
     for action in (['kill','--kill-whom=all','--signal=SIGKILL'],['stop']):
-        try:subprocess.run(['/usr/bin/systemctl','--user',*action,scope+'.scope'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=5)
+        try:subprocess.run(['/usr/bin/systemctl','--user',*action,scope+'.scope'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=1)
         except (OSError,subprocess.TimeoutExpired):pass
+    empty=scope_empty(scope)
+    if empty:
+        # A killed launcher can leave only a failed-unit tombstone. Unload this
+        # verified-empty private unit so admission diagnostics see no residue.
+        try:subprocess.run(['/usr/bin/systemctl','--user','reset-failed',scope+'.scope'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=1)
+        except (OSError,subprocess.TimeoutExpired):pass
+    return empty and scope_empty(scope)
 
-def interrupted(_signum,_frame):raise SystemExit(0)
+def lifecycle_phase(_name):
+    # Trusted qualification may replace this callback; no wire/config hook exists.
+    pass
 
 def main():
-    for signum in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT):signal.signal(signum,interrupted)
-    child=proxy=watchdog=None;liveness=None;master=slave=None;scope='fred-ai-'+uuid.uuid4().hex;session=None
-    queue=collections.deque();queued=0;buffer=b'';input_pending=bytearray();started=False;ending=False;exit_code=0;deadline=time.monotonic()+1800
+    interrupted=False
+    def on_signal(_signum,_frame):
+        nonlocal interrupted
+        interrupted=True
+    for signum in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT):signal.signal(signum,on_signal)
+    watchdog=None;master=slave=None;scope='fred-ai-'+uuid.uuid4().hex
+    queue=collections.deque();queued=0;buffer=b'';control_buffer=b'';input_pending=bytearray()
+    started=False;pending=False;stopping=False;done=False;exit_code=0;clean=False;exit_sent=False
+    deadline=time.monotonic()+1800
     def emit(kind,**fields):
         nonlocal queued
         data=message(kind,**fields);queue.append(data);queued+=len(data)
+    def request_stop():
+        nonlocal stopping,done,clean
+        if stopping:return
+        stopping=True
+        if watchdog is None:done=True;clean=True
+        else:
+            try:watchdog.stdin.write(b'stop\n');watchdog.stdin.flush()
+            except (OSError,BrokenPipeError):pass
     os.set_blocking(0,False);os.set_blocking(1,False)
     try:
-        while True:
+        while not done:
+            if interrupted:request_stop()
             if time.monotonic()>deadline:raise ValueError('lifetime')
             if queued>512*1024:raise ValueError('backpressure')
-            readers=[0]+([master] if master is not None and not ending else [])
-            writers=([1] if queue else [])+([master] if master is not None and input_pending and not ending else [])
+            readers=([0] if not stopping else [])+([master] if master is not None and not stopping else [])+([watchdog.stdout] if watchdog is not None else [])
+            writers=([1] if queue else [])+([master] if master is not None and input_pending and not stopping else [])
             ready,writable,_=select.select(readers,writers,[],.1)
             if master is not None and master in writable:
                 try:del input_pending[:os.write(master,input_pending)]
@@ -54,78 +91,91 @@ def main():
                 except BlockingIOError:pass
             if 0 in ready:
                 chunk=os.read(0,4096)
-                if not chunk:break
-                buffer+=chunk
-                if len(buffer)>MAX_LINE:raise ValueError('input_limit')
-                while b'\n' in buffer:
-                    line,buffer=buffer.split(b'\n',1)
-                    data=json.loads(line)
-                    if type(data) is not dict or type(data.get('type')) is not str:raise ValueError('protocol')
-                    kind=data['type']
-                    if kind=='start' and not started and set(data)=={'type','provider','cols','rows'}:
-                        provider=data['provider'];cols=dimensions(data['cols']);rows=dimensions(data['rows'])
-                        if provider not in ('codex','claude'):raise ValueError('provider')
-                        if provider=='claude' and not CLAUDE.is_dir():raise ValueError('runtime_unavailable')
-                        root=pathlib.Path.home()/'.local/share/fred-ai/sessions';root.mkdir(parents=True,exist_ok=True,mode=0o700)
-                        session=tempfile.TemporaryDirectory(prefix='session-',dir=root);socket_path=pathlib.Path(session.name)/'proxy.sock'
-                        proxy=subprocess.Popen(['/usr/bin/node',str(TOOLS/'ai-terminal-proxy.mjs'),str(socket_path),provider],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env={'PATH':'/usr/bin:/bin','HOME':'/nonexistent'},start_new_session=True)
-                        if not select.select([proxy.stdout],[],[],5)[0] or proxy.stdout.readline(64)!=b'ready\n':raise ValueError('proxy_unavailable')
-                        read_pipe,liveness=os.pipe()
-                        watchdog=subprocess.Popen(['/usr/bin/python3',str(TOOLS/'ai-terminal-watchdog.py'),scope,session.name,str(proxy.pid)],stdin=read_pipe,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True,close_fds=True)
-                        os.close(read_pipe)
-                        master,slave=pty.openpty();fcntl.ioctl(slave,0x5414,struct.pack('HHHH',rows,cols,0,0));os.set_blocking(master,False)
-                        def terminal_session():
-                            os.setsid();fcntl.ioctl(slave,0x540E,0)
-                        child=subprocess.Popen(sandbox_command(socket_path,provider,scope),stdin=slave,stdout=slave,stderr=slave,preexec_fn=terminal_session,close_fds=True)
-                        os.close(slave);slave=None;started=True;emit('ready',provider=provider,cols=cols,rows=rows)
-                    elif kind=='input' and started and not ending and set(data)=={'type','data'}:
-                        if type(data['data']) is not str or len(data['data'])>5500:raise ValueError('input_limit')
-                        payload=base64.b64decode(data['data'],validate=True)
-                        if len(payload)>4096:raise ValueError('input_limit')
-                        input_pending.extend(payload)
-                        if len(input_pending)>32768:raise ValueError('input_limit')
-                    elif kind=='resize' and started and not ending and set(data)=={'type','cols','rows'}:
-                        cols=dimensions(data['cols']);rows=dimensions(data['rows']);fcntl.ioctl(master,0x5414,struct.pack('HHHH',rows,cols,0,0))
-                    elif kind=='stop' and set(data)=={'type'}:ending=True;cleanup_scope(scope)
-                    else:raise ValueError('protocol')
-            if master in ready and master is not None:
+                if not chunk:request_stop()
+                else:
+                    buffer+=chunk
+                    if len(buffer)>MAX_LINE:raise ValueError('input_limit')
+                    while b'\n' in buffer and not stopping:
+                        line,buffer=buffer.split(b'\n',1);data=json.loads(line)
+                        if type(data) is not dict or type(data.get('type')) is not str:raise ValueError('protocol')
+                        kind=data['type']
+                        if kind=='start' and not started and not pending and set(data)=={'type','provider','cols','rows'}:
+                            provider=data['provider'];cols=dimensions(data['cols']);rows=dimensions(data['rows'])
+                            if provider not in ('codex','claude'):raise ValueError('provider')
+                            if provider=='claude' and not CLAUDE.is_dir():raise ValueError('runtime_unavailable')
+                            root=pathlib.Path.home()/'.local/share/fred-ai/sessions'
+                            session_path=root/('session-'+uuid.uuid4().hex)
+                            master,slave=pty.openpty();fcntl.ioctl(slave,0x5414,struct.pack('HHHH',rows,cols,0,0));os.set_blocking(master,False)
+                            lifecycle_phase('before-watchdog')
+                            watchdog=subprocess.Popen(['/usr/bin/python3',str(TOOLS/'ai-terminal-watchdog.py'),scope,str(session_path),provider,str(slave)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True,pass_fds=(slave,))
+                            lifecycle_phase('after-watchdog')
+                            os.close(slave);slave=None;pending=True
+                        elif kind=='input' and started and set(data)=={'type','data'}:
+                            if type(data['data']) is not str or len(data['data'])>5500:raise ValueError('input_limit')
+                            payload=base64.b64decode(data['data'],validate=True)
+                            if len(payload)>4096:raise ValueError('input_limit')
+                            input_pending.extend(payload)
+                            if len(input_pending)>32768:raise ValueError('input_limit')
+                        elif kind=='resize' and started and set(data)=={'type','cols','rows'}:
+                            cols=dimensions(data['cols']);rows=dimensions(data['rows']);fcntl.ioctl(master,0x5414,struct.pack('HHHH',rows,cols,0,0))
+                        elif kind=='stop' and set(data)=={'type'}:request_stop()
+                        else:raise ValueError('protocol')
+            if master is not None and master in ready:
                 try:
                     payload=os.read(master,8192)
                     if payload:emit('output',data=base64.b64encode(payload).decode('ascii'))
                 except OSError:pass
-            if child is not None and child.poll() is not None and not ending:ending=True
-            if ending:
-                if not any(b'"type":"exit"' in item for item in queue):
-                    emit('exit',code=child.poll() if child is not None and child.poll() is not None else 0)
-                while queue:
-                    if select.select([],[1],[],2)[1]:
-                        sent=os.write(1,queue[0]);queue[0]=queue[0][sent:]
-                        if not queue[0]:queue.popleft()
-                    else:break
-                break
+            if watchdog is not None and watchdog.stdout in ready:
+                chunk=os.read(watchdog.stdout.fileno(),4096)
+                if not chunk:raise ValueError('supervisor_lost')
+                control_buffer+=chunk
+                if len(control_buffer)>8192:raise ValueError('supervisor_lost')
+                while b'\n' in control_buffer:
+                    line,control_buffer=control_buffer.split(b'\n',1);event=json.loads(line)
+                    if event.get('type')=='ready':started=True;emit('ready',provider=provider,cols=cols,rows=rows)
+                    elif event.get('type')=='exit':emit('exit',code=event['code']);exit_sent=True;stopping=True
+                    elif event.get('type')=='ended':clean=event.get('clean') is True;done=True
+                    elif event.get('type')=='error':emit('error',code='worker_failed');exit_code=1
+                    else:raise ValueError('supervisor_lost')
+            if watchdog is not None and watchdog.poll() is not None and not done:raise ValueError('supervisor_lost')
     except (ValueError,TypeError,KeyError,OSError,subprocess.SubprocessError) as error:
         exit_code=1
-        try:os.write(1,message('error',code=str(error) if isinstance(error,ValueError) and str(error) in ('protocol','dimensions','provider','runtime_unavailable','input_limit','lifetime','backpressure','proxy_unavailable') else 'worker_failed'))
-        except OSError:pass
+        queue.clear();queued=0
+        emit('error',code=str(error) if isinstance(error,ValueError) and str(error) in ('protocol','dimensions','provider','runtime_unavailable','input_limit','lifetime','backpressure','supervisor_lost') else 'worker_failed')
     finally:
-        cleanup_scope(scope)
-        if child is not None:
-            try:os.killpg(child.pid,signal.SIGKILL)
-            except ProcessLookupError:pass
-            try:child.wait(timeout=5)
-            except subprocess.TimeoutExpired:pass
+        if watchdog is not None:
+            try:watchdog.stdin.close()
+            except OSError:pass
+            end=time.monotonic()+9
+            while not done and time.monotonic()<end:
+                if not select.select([watchdog.stdout],[],[],.1)[0]:continue
+                chunk=os.read(watchdog.stdout.fileno(),4096)
+                if not chunk:break
+                control_buffer+=chunk
+                while b'\n' in control_buffer:
+                    line,control_buffer=control_buffer.split(b'\n',1)
+                    try:event=json.loads(line)
+                    except ValueError:continue
+                    if event.get('type')=='exit' and not exit_sent:emit('exit',code=event.get('code',1));exit_sent=True
+                    if event.get('type')=='ended':clean=event.get('clean') is True;done=True
+            if clean:
+                try:watchdog.wait(timeout=1)
+                except subprocess.TimeoutExpired:clean=False
+                if watchdog.returncode!=0:clean=False
+        else:clean=True
         for descriptor in (master,slave):
             if descriptor is not None:
                 try:os.close(descriptor)
                 except OSError:pass
-        if proxy is not None:
-            proxy.terminate()
-            try:proxy.wait(timeout=5)
-            except subprocess.TimeoutExpired:proxy.kill();proxy.wait()
-        if liveness is not None:os.close(liveness)
-        if watchdog is not None:
-            try:watchdog.wait(timeout=12)
-            except subprocess.TimeoutExpired:watchdog.kill();watchdog.wait()
-        if session is not None:session.cleanup()
+        emit('ended',clean=clean)
+        if not clean:exit_code=1
+        flush_until=time.monotonic()+1
+        while queue and time.monotonic()<flush_until:
+            if not select.select([],[1],[],.1)[1]:continue
+            try:
+                sent=os.write(1,queue[0]);queue[0]=queue[0][sent:]
+                if not queue[0]:queue.popleft()
+            except OSError:exit_code=1;break
+        if queue:exit_code=1
     return exit_code
 if __name__=='__main__':sys.exit(main())
