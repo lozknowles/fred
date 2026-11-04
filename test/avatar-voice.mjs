@@ -135,3 +135,10 @@ test('180 cleaned characters are accepted and unavailable session never posts',a
  const off=typedFixture(undefined,async()=>{calls++;return Response.json({available:false,message:'secret internal detail'});});
  await off.voice.speakTyped('hello');assert.equal(calls,3);assert.match(off.states.at(-1).message,/unavailable/);assert.doesNotMatch(off.states.at(-1).message,/secret/);off.voice.dispose();
 });
+
+test('default fetch retains the browser global receiver while allowing injected fetch mocks',async t=>{
+ const calls=[];
+ t.mock.method(globalThis,'fetch',function(url,options){assert.equal(this,globalThis,'Window.fetch requires the native global receiver');calls.push(url);return Promise.resolve(url.endsWith('/session')?session():wav());});
+ const f=fixture(undefined,{urls:{createObjectURL:()=> 'blob:receiver-test',revokeObjectURL(){}}});
+ assert.equal(await f.voice.speakTyped('Browser receiver regression'),true);assert.deepEqual(calls,['/api/avatar-voice/session','/api/avatar-voice']);f.voice.dispose();
+});

@@ -25,7 +25,7 @@ export function canSpeakAvatarKey(event,ready,doc=globalThis.document) {
 export const AVATAR_VOICE_MAX_CHARACTERS=MAX_SPEECH_LENGTH;
 export const AVATAR_VOICE_MAX_BYTES=1800000;
 export class AvatarVoice {
-	constructor({createAudio=()=>new Audio(),fetch=globalThis.fetch,urls=globalThis.URL,document=globalThis.document,window=globalThis.window,onState=()=>{}}={}) {
+	constructor({createAudio=()=>new Audio(),fetch=(...args)=>globalThis.fetch(...args),urls=globalThis.URL,document=globalThis.document,window=globalThis.window,onState=()=>{}}={}) {
 		Object.assign(this,{createAudio,fetch,urls,document,window,onState});
 		this.audio=null;this.serial=0;this.disposed=false;this.controller=null;this.objectURL=null;this.generated=null;this.replayTyped=false;
 		this.onVisibility=()=>{if(document?.hidden)this.stop();};this.onHide=()=>this.stop();
