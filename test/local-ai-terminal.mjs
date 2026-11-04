@@ -9,15 +9,15 @@ import {createTerminalBroker} from '../tools/local-ai-terminal.mjs';
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(predicate,timeout=1500){const end=Date.now()+timeout;while(!predicate()){if(Date.now()>end)throw Error('Condition did not settle');await wait(5);}}
 function fakeChild(){
- const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.commands=[];child.kills=0;child.pressure=0;
- Object.defineProperty(child.stdin,'writableLength',{get:()=>child.pressure});let pending='';child.stdin.on('data',chunk=>{pending+=chunk.toString();let end;while((end=pending.indexOf('\n'))!==-1){child.commands.push(JSON.parse(pending.slice(0,end)));pending=pending.slice(end+1);}});
- child.kill=()=>{child.kills++;child.emit('close',0);return true;};child.emitOutput=value=>child.stdout.write(JSON.stringify(value)+'\n');return child;
+ const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.commands=[];child.kills=0;child.pressure=0;child.autoClean=true;
+ Object.defineProperty(child.stdin,'writableLength',{get:()=>child.pressure});let pending='';child.stdin.on('data',chunk=>{pending+=chunk.toString();let end;while((end=pending.indexOf('\n'))!==-1){const message=JSON.parse(pending.slice(0,end));child.commands.push(message);pending=pending.slice(end+1);if(message.type==='stop'&&child.autoClean)setImmediate(()=>child.clean());}});
+ child.clean=()=>{child.emitOutput({type:'ended',clean:true});child.closed=true;child.emit('close',0);};child.kill=()=>{child.kills++;child.closed=true;child.emit('close',1);return true;};child.emitOutput=value=>child.stdout.write(JSON.stringify(value)+'\n');return child;
 }
 async function fixture(t,options={}){
  const children=[],clients=[];let clock=100000,broker;
  const server=createServer(async(req,res)=>{try{if(!await broker.handle(req,res)){res.writeHead(404);res.end();}}catch(error){res.writeHead(500);res.end(error.message);}});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+server.address().port;
- broker=createTerminalBroker({origin,connection:{host:'fixture',port:22,worker:'/fixture.py'},spawnWorker:()=>{const child=fakeChild();children.push(child);return child;},now:()=>clock,graceMs:60,idleMs:1000,attachMs:50,killMs:15,...options});server.on('upgrade',(req,socket,head)=>broker.upgrade(req,socket,head));
+ broker=createTerminalBroker({origin,connection:{host:'fixture',port:22,worker:'/fixture.py'},spawnWorker:()=>{const child=fakeChild();children.push(child);return child;},now:()=>clock,graceMs:60,idleMs:1000,attachMs:50,killMs:15,endWaitMs:40,...options});server.on('upgrade',(req,socket,head)=>broker.upgrade(req,socket,head));
  t.after(async()=>{for(const client of clients)client.terminate();broker.dispose();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await wait(20);});
  const http=async(path='/session',{method='GET',owner,body,raw,headers={}}={})=>{
   const data=raw??(body===undefined?undefined:JSON.stringify(body));
@@ -72,26 +72,37 @@ test('invalid settings and websocket input/resize bounds including noncanonical 
  }
  assert.equal(f.children[0].commands.length,1,'no invalid command reached PTY');
 });
-test('disconnect resumes one PTY within grace; expired grace/idle/end stop and force-kill child',async t=>{
+test('disconnect resumes one PTY within grace; expired grace/idle/end request and verify child cleanup',async t=>{
  const f=await fixture(t),owner=await f.owner(),cap=await f.start(owner),ws=await f.attach(owner,cap);await f.close(ws);assert.equal(f.broker.diagnostics().sessions,1);
  f.advance(20);const resume=await f.http('/attach',{method:'POST',owner,body:{sessionId:cap.sessionId}});assert.equal(resume.status,200);f.children[0].emitOutput({type:'output',data:Buffer.from('while detached').toString('base64')});const again=await f.attach(owner,resume.value);assert.equal(f.children.length,1);await until(()=>again.messages.some(m=>m.type==='output'));await f.close(again);await wait(5);f.advance(61);
- assert.equal((await f.http('/attach',{method:'POST',owner,body:{sessionId:cap.sessionId}})).status,404,'expiry enforced before timer reap');await until(()=>f.children[0].kills===1);assert.ok(f.children[0].commands.some(m=>m.type==='stop'));
- const next=await f.start(owner),active=await f.attach(owner,next);f.advance(1001);f.broker.reap();await until(()=>active.readyState===WebSocket.CLOSED);assert.equal(f.broker.diagnostics().sessions,0);await until(()=>f.children[1].kills===1);
- const last=await f.start(owner);const ended=await f.http('/end',{method:'POST',owner,body:{sessionId:last.sessionId}});assert.equal(ended.status,200);assert.deepEqual(ended.value,{ok:true});await until(()=>f.children[2].kills===1);assert.equal(f.broker.diagnostics().sessions,0);
+ assert.equal((await f.http('/attach',{method:'POST',owner,body:{sessionId:cap.sessionId}})).status,409,'expiry immediately begins cleanup before timer reap');await until(()=>f.broker.diagnostics().sessions===0);await until(()=>f.children[0].closed===true);assert.ok(f.children[0].commands.some(m=>m.type==='stop'));
+ const next=await f.start(owner),active=await f.attach(owner,next);f.advance(1001);f.broker.reap();await until(()=>active.readyState===WebSocket.CLOSED);await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0);await until(()=>f.children[1].closed===true);
+ const last=await f.start(owner);const ended=await f.http('/end',{method:'POST',owner,body:{sessionId:last.sessionId}});assert.equal(ended.status,200);assert.deepEqual(ended.value,{ok:true});await until(()=>f.children[2].closed===true);await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0);
+});
+test('End waits for final clean acknowledgement AND SSH close0; pending/quarantined sessions still occupy capacity',async t=>{
+ const f=await fixture(t,{killMs:1000,endWaitMs:50}),owner=await f.owner(),first=await f.start(owner,'codex'),second=await f.start(owner,'claude');f.children.forEach(child=>{child.autoClean=false;});
+ let resolved=false;const ending=f.http('/end',{method:'POST',owner,body:{sessionId:first.sessionId}}).then(result=>{resolved=true;return result;});await wait(5);assert.equal(f.broker.diagnostics().sessions,2);assert.equal(f.broker.diagnostics().stopping,1);
+ const other=await f.owner();assert.equal((await f.http('/start',{method:'POST',owner:other,body:{provider:'codex',cols:80,rows:24}})).status,429);
+ f.children[0].emitOutput({type:'ended',clean:true});await wait(5);assert.equal(resolved,false,'ack alone cannot claim remote process exit');assert.equal(f.broker.diagnostics().sessions,2);f.children[0].closed=true;f.children[0].emit('close',0);assert.equal((await ending).status,200);assert.equal(f.broker.diagnostics().sessions,1);
+ const bad=f.http('/end',{method:'POST',owner,body:{sessionId:second.sessionId}});await wait(5);f.children[1].emitOutput({type:'ended',clean:false});f.children[1].closed=true;f.children[1].emit('close',0);assert.equal((await bad).status,503);assert.equal(f.broker.diagnostics().sessions,1);assert.equal(f.broker.diagnostics().quarantined,1);assert.equal((await f.http('/attach',{method:'POST',owner,body:{sessionId:second.sessionId}})).status,409);assert.equal((await f.http('/start',{method:'POST',owner,body:{provider:'claude',cols:80,rows:24}})).status,429);
+});
+test('SSH close without cleanup proof and forced transport kill remain quarantined without false successful End',async t=>{
+ const f=await fixture(t,{killMs:15,endWaitMs:40}),owner=await f.owner(),cap=await f.start(owner);const child=f.children[0];child.autoClean=false;child.closed=true;child.emit('close',0);assert.equal((await f.http('/end',{method:'POST',owner,body:{sessionId:cap.sessionId}})).status,503);assert.equal(f.broker.diagnostics().sessions,1);assert.equal(f.broker.diagnostics().quarantined,1);
+ const second=await f.start(owner,'claude'),forced=f.children[1];forced.autoClean=false;assert.equal((await f.http('/end',{method:'POST',owner,body:{sessionId:second.sessionId}})).status,503);assert.equal(forced.kills,1);assert.equal(f.broker.diagnostics().quarantined,2);assert.equal(f.broker.diagnostics().sessions,2);
 });
 test('startup failures, child errors/exits and malformed/oversized detached output never leave a live session',async t=>{
  const throwing=await fixture(t,{spawnWorker(){throw Error('private details must not leak');}}),owner=await throwing.owner();const failed=await throwing.http('/start',{method:'POST',owner,body:{provider:'codex',cols:80,rows:24}});assert.equal(failed.status,503);assert.doesNotMatch(JSON.stringify(failed.value),/private details/);assert.equal(throwing.broker.diagnostics().sessions,0);
- const f=await fixture(t),a=await f.owner();let cap=await f.start(a),child=f.children.at(-1);child.emit('error',Error('ssh secret'));assert.equal(f.broker.diagnostics().sessions,0);await until(()=>child.kills===1);
- cap=await f.start(a);child=f.children.at(-1);const ws=await f.attach(a,cap);child.emitOutput({type:'error',message:'DO NOT EXPOSE THIS LOGIN CODE'});await until(()=>ws.readyState===WebSocket.CLOSED);assert.ok(ws.messages.some(m=>m.type==='error'));assert.doesNotMatch(JSON.stringify(ws.messages),/LOGIN CODE/);assert.equal(f.broker.diagnostics().sessions,0);
- await f.start(a);child=f.children.at(-1);child.emitOutput({type:'output',data:'Zh=='});assert.equal(f.broker.diagnostics().sessions,0);
- await f.start(a);child=f.children.at(-1);for(let i=0;i<12&&f.broker.diagnostics().sessions;i++)child.emitOutput({type:'output',data:Buffer.alloc(49152).toString('base64')});assert.equal(f.broker.diagnostics().sessions,0,'detached output queue remains bounded');
+ const f=await fixture(t),a=await f.owner();let cap=await f.start(a),child=f.children.at(-1);child.emit('error',Error('ssh secret'));await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0);await until(()=>child.closed===true);
+ cap=await f.start(a);child=f.children.at(-1);const ws=await f.attach(a,cap);child.emitOutput({type:'error',message:'DO NOT EXPOSE THIS LOGIN CODE'});await until(()=>ws.readyState===WebSocket.CLOSED);assert.ok(ws.messages.some(m=>m.type==='error'));assert.doesNotMatch(JSON.stringify(ws.messages),/LOGIN CODE/);await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0);
+ await f.start(a);child=f.children.at(-1);child.emitOutput({type:'output',data:'Zh=='});await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0);
+ await f.start(a);child=f.children.at(-1);for(let i=0;i<12&&f.broker.diagnostics().sessions;i++)child.emitOutput({type:'output',data:Buffer.alloc(49152).toString('base64')});await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0,'detached output queue remains bounded');
 });
 test('slow actual WebSocket receivers and backed-up PTY stdin are terminated with bounded memory',async t=>{
  const f=await fixture(t),owner=await f.owner(),cap=await f.start(owner),ws=await f.attach(owner,cap),child=f.children[0];ws._socket.pause();const data=Buffer.alloc(49152,120).toString('base64');let chunks=0;
- for(;chunks<1024&&f.broker.diagnostics().sessions;chunks++)child.emitOutput({type:'output',data});assert.equal(f.broker.diagnostics().sessions,0,'output receiver backpressure must stop session');assert.ok(chunks<1024);ws._socket.resume();await until(()=>ws.readyState===WebSocket.CLOSED,3000);await until(()=>child.kills===1);
- const second=await f.start(owner),live=await f.attach(owner,second),backed=f.children[1];backed.pressure=65537;live.send(JSON.stringify({type:'input',data:'eA=='}));await until(()=>f.broker.diagnostics().sessions===0);await until(()=>backed.kills===1);
+ for(;chunks<1024&&!f.broker.diagnostics().stopping;chunks++)child.emitOutput({type:'output',data});await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0,'output receiver backpressure must stop session');assert.ok(chunks<1024);ws._socket.resume();await until(()=>ws.readyState===WebSocket.CLOSED,3000);await until(()=>child.closed===true);
+ const second=await f.start(owner),live=await f.attach(owner,second),backed=f.children[1];backed.pressure=65537;live.send(JSON.stringify({type:'input',data:'eA=='}));await until(()=>f.broker.diagnostics().sessions===0);await until(()=>backed.closed===true);
 });
 test('terminal hard lifetime expires at30minutes even when recent input prevents idle expiry',async t=>{
  const f=await fixture(t,{idleMs:3600000}),owner=await f.owner(),cap=await f.start(owner),ws=await f.attach(owner,cap);
- f.advance(1799999);ws.send(JSON.stringify({type:'input',data:'eA=='}));await until(()=>f.children[0].commands.some(m=>m.type==='input'));assert.equal(f.broker.diagnostics().sessions,1);f.advance(1);f.broker.reap();assert.equal(f.broker.diagnostics().sessions,0);await until(()=>f.children[0].kills===1);
+ f.advance(1799999);ws.send(JSON.stringify({type:'input',data:'eA=='}));await until(()=>f.children[0].commands.some(m=>m.type==='input'));assert.equal(f.broker.diagnostics().sessions,1);f.advance(1);f.broker.reap();await until(()=>f.broker.diagnostics().sessions===0);assert.equal(f.broker.diagnostics().sessions,0);await until(()=>f.children[0].closed===true);
 });

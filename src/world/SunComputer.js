@@ -37,7 +37,7 @@ export class SunComputer {
   const button=(text,fn)=>{const node=el('button',text,tools);node.type='button';node.onclick=fn;return node;};
   this.connectButton=button('Connect',()=>this.connect(false));this.resumeButton=button('Resume session',()=>this.connect(true));this.endButton=button('End session and sign out',()=>this.endSession());this.leaveButton=button('Leave',()=>this.close());
   this.status=el('p','Disconnected',shell);this.status.className='elsemesh-sun-status';this.status.setAttribute('role','status');this.status.setAttribute('aria-live','polite');
-  const help=el('p','Live official CLI. Sign in in the provider browser page; paste its authorization code here only when the official CLI asks. User paste and selected-text copy are available; automatic clipboard access is blocked. Leave disconnects this screen; resume within 60 seconds. Temporary work is deleted when you end the session or it expires (30 minutes). End session removes sign-in from this temporary workstation, not your other devices.',shell);help.className='elsemesh-sun-help';
+  const help=el('p','Live official CLI. Sign in in the provider browser page; paste its authorization code here only when the official CLI asks. User paste and selected-text copy are available; automatic clipboard access is blocked. The sign-in browser tab may stay open during the 30-minute session. Leave disconnects and keeps this private screen in memory for only 60 seconds. Temporary work is deleted when you end the session or it expires (30 minutes). End session removes sign-in from this temporary workstation, not your other devices.',shell);help.className='elsemesh-sun-help';
   this.links=el('div',null,shell);this.links.className='elsemesh-sun-links';this.links.setAttribute('aria-label','Official provider sign-in links');
   this.mount=el('div',null,shell);this.mount.className='elsemesh-sun-output';this.mount.setAttribute('aria-label','Live private terminal');
   this.dialog.addEventListener('keydown',e=>e.stopPropagation());this.dialog.addEventListener('keyup',e=>e.stopPropagation());
@@ -45,17 +45,19 @@ export class SunComputer {
   for(const event of ['paste','copy','cut'])this.dialog.addEventListener(event,e=>e.stopPropagation());
   this.dialog.addEventListener('cancel',e=>{e.preventDefault();this.close();});this.doc.body.append(this.dialog);
   this.resize=()=>this.fitTerminal();this.win.addEventListener('resize',this.resize);
-  this.visibility=()=>{
-   if(!this.active)return;
-   if(this.doc.visibilityState==='hidden'){
-    ++this.generation;this.disconnect();this.clearTerminal();this.csrf=null;this.capabilities=null;this.busy=false;this.inputQueue=Promise.resolve();this.outputQueue=Promise.resolve();this.outputBudget={bytes:0};
-    if(this.session)this.session.resumeUntil=this.now()+60000;this.setStatus('Disconnected while hidden. Return here to resume within 60 seconds.');this.updateButtons();
-   }else void this.refreshCapabilities(this.generation);
-  };this.doc.addEventListener('visibilitychange',this.visibility);
-  this.blur=()=>this.display.clear();this.focus=()=>{if(this.active&&this.terminal)this.display.attach(this.terminal);};this.win.addEventListener('blur',this.blur);this.win.addEventListener('focus',this.focus);
+  this.focused=this.doc.hasFocus?.()??true;
+  this.visibility=()=>{this.focused=this.doc.visibilityState!=='hidden'&&(this.doc.hasFocus?.()??true);if(this.terminal)this.terminal.options.disableStdin=!this.visibleInput();this.syncDisplay();};this.doc.addEventListener('visibilitychange',this.visibility);
+  this.blur=()=>{this.focused=false;this.display.clear();};this.focus=()=>{this.focused=true;this.syncDisplay();};this.win.addEventListener('blur',this.blur);this.win.addEventListener('focus',this.focus);
   this.updateButtons();
  }
  getDisplayCanvas(){return this.display.getDisplayCanvas();}
+ visibleInput(){return this.active&&this.doc.visibilityState!=='hidden'&&this.focused;}
+ syncDisplay(){if(this.terminal)this.terminal.options.disableStdin=!(this.visibleInput()&&this.ready);if(this.visibleInput()&&this.terminal&&this.ready){if(!this.display.open||this.display.terminal!==this.terminal)this.display.attach(this.terminal);}else if(this.display.open)this.display.clear();}
+ retainTerminal(){
+  if(this.terminal)this.terminal.options.disableStdin=true;this.display.clear();clearTimeout(this.retentionTimer);
+  if(this.session){this.session.resumeUntil=this.now()+60000;this.retentionTimer=setTimeout(()=>this.expireRetained(),60000);this.retentionTimer.unref?.();}
+ }
+ expireRetained(){if(this.session&&!this.socket&&this.now()>=this.session.resumeUntil){this.session=null;this.clearTerminal();this.setStatus('Your previous session has expired. Connect to begin a new session.');this.updateButtons();}}
  setStatus(text){this.status.textContent=text;}
  current(generation){return this.active&&!this.disposed&&generation===this.generation;}
  async authorized(generation,command=false){
@@ -78,9 +80,9 @@ export class SunComputer {
   return response.json();
  }
  async open(){
-  if(this.active||this.disposed)return;const generation=++this.generation;this.active=true;this.busy=false;this.csrf=null;this.capabilities=null;this.inputQueue=Promise.resolve();this.outputBudget={bytes:0};
+  if(this.active||this.disposed)return;this.expireRetained();clearTimeout(this.retentionTimer);const generation=++this.generation;this.active=true;this.focused=this.doc.hasFocus?.()??true;this.busy=false;this.csrf=null;this.capabilities=null;this.inputQueue=Promise.resolve();this.outputBudget={bytes:0};
   this.app.input.suspend();this.doc.exitPointerLock?.();this.dialog.showModal();this.provider.focus();this.setStatus('Checking live AI terminal availability…');this.updateButtons();
-  this.heartbeat=setInterval(()=>{if(this.authorityPending)return;this.authorityPending=true;this.authorized(this.generation).finally(()=>{this.authorityPending=false;});this.display.draw();},100);
+  this.heartbeat=setInterval(()=>{if(this.authorityPending)return;this.authorityPending=true;this.authorized(this.generation).finally(()=>{this.authorityPending=false;});this.expireRetained();this.syncDisplay();this.display.draw();},100);
   if(!await this.authorized(generation))return;
   return this.refreshCapabilities(generation);
  }
@@ -96,16 +98,15 @@ export class SunComputer {
   }catch(error){if(this.current(generation)){this.csrf=null;this.setStatus(error.message);this.updateButtons();}}
  }
  async ensureTerminal(generation){
-  if(this.terminal)return true;const loaded=await this.loadTerminal();
+  if(this.terminal){this.bindTerminal(generation);this.fitTerminal();return true;}const loaded=await this.loadTerminal();
   if(!this.current(generation)){loaded.terminal.dispose();return false;}
   this.terminal=loaded.terminal;this.fit=loaded.fit;this.terminal.options.linkHandler={activate:(_event,url)=>this.openAuthLink(url)};
   // Only deliberate native paste/copy gestures are allowed. Remote OSC52 never
   // reads or writes the clipboard; no clipboard addon is loaded.
   this.osc=this.terminal.parser.registerOscHandler(52,()=>true);
-  this.terminal.open(this.mount);this.dataListener=this.terminal.onData(data=>this.enqueueInput(data,generation));
-  this.renderListener=this.terminal.onRender(()=>this.display.markDirty());this.resizeListener=this.terminal.onResize(size=>this.sendResize(size,generation));
-  this.display.attach(this.terminal);this.fitTerminal();return true;
+  this.terminal.open(this.mount);this.renderListener=this.terminal.onRender(()=>this.display.markDirty());this.bindTerminal(generation);this.fitTerminal();return true;
  }
+ bindTerminal(generation){this.dataListener?.dispose();this.resizeListener?.dispose();this.dataListener=this.terminal.onData(data=>this.enqueueInput(data,generation));this.resizeListener=this.terminal.onResize(size=>this.sendResize(size,generation));this.terminal.options.disableStdin=true;}
  fitTerminal(){if(!this.active||!this.terminal)return;try{this.fit?.fit();const size=this.dimensions();if(this.terminal.cols!==size.cols||this.terminal.rows!==size.rows)this.terminal.resize?.(size.cols,size.rows);}catch{}this.display.markDirty();}
  async connect(resume=false){
   const generation=this.generation;if(this.busy||this.socket||!this.capabilities?.available||!this.csrf)return false;
@@ -125,7 +126,7 @@ export class SunComputer {
    const socket=new this.WebSocket(url.href);this.socket=socket;
    socket.onopen=async()=>{if(this.socket!==socket||!await this.authorized(generation,true)||this.socket!==socket){socket.close();return;}socket.send(JSON.stringify({type:'attach',sessionId:result.sessionId,attachment:result.attachment}));};
    socket.onmessage=event=>this.receive(event,socket,generation);
-   socket.onclose=()=>{if(this.socket!==socket||!this.current(generation))return;this.socket=null;this.session.resumeUntil=this.now()+60000;this.setStatus('Disconnected. Resume within 60 seconds.');this.clearTerminal();this.updateButtons();};
+   socket.onclose=()=>{if(this.socket!==socket||!this.current(generation))return;this.socket=null;this.ready=false;this.setStatus('Disconnected. Resume within 60 seconds.');this.retainTerminal();this.updateButtons();};
    socket.onerror=()=>{if(this.socket===socket&&this.current(generation))this.setStatus('Live terminal connection failed.');};
    this.setStatus('Connecting to live '+provider+' terminal…');return true;
   }catch(error){if(this.current(generation)){if(resume&&error.status===404){this.session=null;this.setStatus('Your previous session has expired or ended. Connect to begin a new session.');}else this.setStatus(error.message);this.clearTerminal();}return false;}
@@ -135,7 +136,7 @@ export class SunComputer {
  enqueueInput(data,generation=this.generation){
   const sourceSocket=this.socket,sourceTerminal=this.terminal;
   this.inputQueue=this.inputQueue.then(async()=>{
-   if(!await this.authorized(generation,true)||!this.ready||this.socket?.readyState!==1||this.socket!==sourceSocket||this.terminal!==sourceTerminal)return;
+   if(!await this.authorized(generation,true)||!this.visibleInput()||!this.ready||this.socket?.readyState!==1||this.socket!==sourceSocket||this.terminal!==sourceTerminal)return;
    const bytes=new TextEncoder().encode(data),socket=this.socket;
    if(bytes.length>MAX_INPUT*16){this.setStatus('Input is too large. Paste at most 64 KiB at a time.');return;}
    for(let offset=0;offset<bytes.length;offset+=MAX_INPUT){if(!this.current(generation)||this.socket!==socket)return;socket.send(JSON.stringify({type:'input',data:base64(bytes.subarray(offset,offset+MAX_INPUT))}));}
@@ -153,7 +154,7 @@ export class SunComputer {
  async receiveMessage(event,socket,generation){
   if(socket!==this.socket||!await this.authorized(generation)||socket!==this.socket)return;
   let message;try{if(typeof event.data!=='string'||event.data.length>MAX_OUTPUT_BASE64+1024)throw Error();message=JSON.parse(event.data);}catch{this.setStatus('Invalid terminal message.');return;}
-  if(message.type==='ready'){this.ready=true;this.setStatus('Connected to live '+this.session.provider+' CLI. Follow its official sign-in instructions.');this.sendResize(null,generation);this.terminal?.focus();}
+  if(message.type==='ready'){this.ready=true;clearTimeout(this.retentionTimer);this.terminal.options.disableStdin=!this.visibleInput();this.syncDisplay();this.setStatus('Connected to live '+this.session.provider+' CLI. Follow its official sign-in instructions.');this.sendResize(null,generation);if(this.visibleInput())this.terminal?.focus();}
   else if(message.type==='output'){
    try{const bytes=outputBytes(message.data);this.scanLinks(bytes);const terminal=this.terminal;if(terminal)await new Promise(resolve=>terminal.write(bytes,()=>{if(this.current(generation)&&terminal===this.terminal)this.display.markDirty();resolve();}));}catch{this.setStatus('Invalid terminal output.');}
   }else if(message.type==='exit'){this.setStatus('Provider CLI exited'+(Number.isInteger(message.code)?' ('+message.code+')':'')+'.');this.disconnect();this.session=null;this.clearTerminal();this.updateButtons();}
@@ -177,12 +178,13 @@ export class SunComputer {
  }
  disconnect(){const socket=this.socket;this.socket=null;this.ready=false;if(socket){socket.onopen=socket.onmessage=socket.onerror=socket.onclose=null;socket.close(1000,'View disconnected');}}
  clearTerminal(){
+  clearTimeout(this.retentionTimer);this.retentionTimer=null;
   for(const item of [this.dataListener,this.renderListener,this.resizeListener,this.osc])item?.dispose();this.dataListener=this.renderListener=this.resizeListener=this.osc=null;
   this.terminal?.dispose();this.terminal=null;this.fit=null;this.mount.replaceChildren();this.links.replaceChildren();this.authLinks=null;this.linkTail='';this.decoder=null;this.display.clear();
  }
  close({resume=true,keepSession=resume}={}){
-  if(!this.active)return;this.active=false;++this.generation;clearInterval(this.heartbeat);this.heartbeat=null;this.disconnect();this.clearTerminal();this.csrf=null;this.capabilities=null;this.busy=false;this.inputQueue=Promise.resolve();this.outputQueue=Promise.resolve();this.outputBudget={bytes:0};
-  if(this.session)this.session.resumeUntil=this.now()+60000;if(!keepSession)this.session=null;this.setStatus('Disconnected');this.dialog.close();this.updateButtons();
+  if(!this.active){if(!keepSession){this.session=null;this.clearTerminal();}return;}this.active=false;++this.generation;clearInterval(this.heartbeat);this.heartbeat=null;this.disconnect();if(keepSession&&this.session)this.retainTerminal();else{this.session=null;this.clearTerminal();}this.csrf=null;this.capabilities=null;this.busy=false;this.inputQueue=Promise.resolve();this.outputQueue=Promise.resolve();this.outputBudget={bytes:0};
+  this.setStatus('Disconnected');this.dialog.close();this.updateButtons();
   if(resume&&(this.app.canResume?.()??true)){this.app.input.resume();this.app.input.requestLock();}
  }
  dispose(){this.close({resume:false});this.disposed=true;this.session=null;this.win.removeEventListener('resize',this.resize);this.win.removeEventListener('blur',this.blur);this.win.removeEventListener('focus',this.focus);this.doc.removeEventListener('visibilitychange',this.visibility);this.dialog.remove();this.display.dispose();}

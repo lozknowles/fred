@@ -25,7 +25,7 @@ export function terminalOverSSH(connection){
 }
 async function body(req){let text='';for await(const chunk of req){text+=chunk;if(Buffer.byteLength(text)>2048)throw Error('Request too large');}return JSON.parse(text);}
 /** Loopback-only owner broker. Provider credentials and terminal bytes are never persisted here. */
-export function createTerminalBroker({origin,connection=null,spawnWorker=()=>terminalOverSSH(connection),now=Date.now,graceMs=60000,idleMs=1800000,attachMs=30000,maxSessions=2,killMs=1500}={}){
+export function createTerminalBroker({origin,connection=null,spawnWorker=()=>terminalOverSSH(connection),now=Date.now,graceMs=60000,idleMs=1800000,attachMs=30000,maxSessions=2,killMs=12000,endWaitMs=12000}={}){
  const expected=new URL(origin);if(expected.protocol!=='http:'||expected.hostname!=='127.0.0.1'||expected.origin!==origin)throw Error('Local terminal requires an exact loopback origin');
  const host=expected.host,cookieName='fred_terminal_'+expected.port,owners=new Map(),sessions=new Map();
  const wss=new WebSocketServer({noServer:true,maxPayload:8192,perMessageDeflate:false});
@@ -33,10 +33,23 @@ export function createTerminalBroker({origin,connection=null,spawnWorker=()=>ter
  function allowed(req,strict=false){return req.headers.host===host&&(!req.headers.origin?!strict:req.headers.origin===origin)&&(!req.headers['sec-fetch-site']||['same-origin','none'].includes(req.headers['sec-fetch-site']));}
  function owner(req){const value=(req.headers.cookie??'').split(';').map(s=>s.trim()).find(s=>s.startsWith(cookieName+'='))?.slice(cookieName.length+1);return value&&owners.get(value);}
  function send(ws,value){if(ws?.readyState===WebSocket.OPEN){if(ws.bufferedAmount>524288){ws.close(1009,'Terminal receiver too slow');return false;}try{ws.send(JSON.stringify(value));}catch{return false;}}return true;}
- function stop(session){if(!session||session.ended)return;session.ended=true;sessions.delete(session.id);session.attachment=null;session.queue=[];session.queuedBytes=0;session.socket?.close(1000,'Session ended');session.socket=null;try{session.child.stdin.end(JSON.stringify({type:'stop'})+'\n');}catch{}const kill=setTimeout(()=>session.child.kill(),killMs);kill.unref?.();session.child.once('close',()=>clearTimeout(kill));}
+ function confirmed(session){
+  if(session.cleanAck===true&&session.childClosed&&session.childCode===0){session.cleaned=true;sessions.delete(session.id);clearTimeout(session.killTimer);session.resolveCleanup(true);return true;}
+  if(session.cleanAck===false||session.childClosed&&(session.childCode!==0||session.cleanAck!==true))session.quarantined=true;return false;
+ }
+ function stop(session){
+  if(!session||session.ended)return;session.ended=true;session.attachment=null;session.queue=[];session.queuedBytes=0;session.socket?.close(1000,'Session stopping');session.socket=null;
+  if(!session.childClosed){session.killTimer=setTimeout(()=>{session.quarantined=true;try{session.child.kill();}catch{}},killMs);session.killTimer.unref?.();}
+  try{session.child.stdin.end(JSON.stringify({type:'stop'})+'\n');}catch{session.quarantined=true;}confirmed(session);
+ }
+ async function waitCleanup(session){
+  if(confirmed(session))return true;let timer;
+  const clean=await Promise.race([session.cleanupPromise,new Promise(resolve=>{timer=setTimeout(()=>resolve(false),endWaitMs);})]);clearTimeout(timer);if(!clean)session.quarantined=true;return clean;
+ }
  function write(session,message){if(session.ended||session.child.stdin.destroyed||session.child.stdin.writableLength>65536){stop(session);return false;}try{return session.child.stdin.write(JSON.stringify(message)+'\n');}catch{stop(session);return false;}}
  function issue(session){session.attachment=token();session.attachExpiry=now()+attachMs;return {sessionId:session.id,attachment:session.attachment,expiresIn:attachMs/1000,provider:session.provider};}
  function output(session,value){
+  if(value?.type==='ended'){session.cleanAck=value.clean===true;confirmed(session);return;}
   if(session.ended)return;
   if(value.type==='output'){
    if(!base64(value.data,90000,true)){stop(session);return;}
@@ -62,15 +75,15 @@ export function createTerminalBroker({origin,connection=null,spawnWorker=()=>ter
    if(!['codex','claude'].includes(value.provider)||!dimensions(value.cols,value.rows)){json(res,400,{error:'Invalid terminal settings'});return true;}
    if(sessions.size>=maxSessions||[...sessions.values()].some(s=>s.owner===own&&s.provider===value.provider)){json(res,429,{error:'End the existing provider session before starting another'});return true;}
    let child;try{child=spawnWorker();}catch{json(res,503,{error:'Private terminal unavailable'});return true;}
-   const session={id:token(),owner:own,provider:value.provider,child,created:now(),last:now(),disconnected:now(),ready:false,ended:false,socket:null,queue:[],queuedBytes:0};sessions.set(session.id,session);
+   const session={id:token(),owner:own,provider:value.provider,child,created:now(),last:now(),disconnected:now(),ready:false,ended:false,cleaned:false,childClosed:false,cleanAck:null,quarantined:false,socket:null,queue:[],queuedBytes:0};session.cleanupPromise=new Promise(resolve=>{session.resolveCleanup=resolve;});sessions.set(session.id,session);
    let buffer='';child.stdout.on('data',chunk=>{buffer+=chunk.toString('utf8');if(buffer.length>150000){stop(session);return;}let newline;while((newline=buffer.indexOf('\n'))!==-1){const line=buffer.slice(0,newline);buffer=buffer.slice(newline+1);try{output(session,JSON.parse(line));}catch{stop(session);}}});
-   child.stderr.on('data',()=>{});child.stdout.on('error',()=>stop(session));child.stderr.on('error',()=>stop(session));child.stdin.on('error',()=>stop(session));child.once('error',()=>{send(session.socket,{type:'error',message:'Private terminal connection failed'});stop(session);});child.once('close',code=>{send(session.socket,{type:'exit',code:Number.isInteger(code)?code:1});stop(session);});
+   child.stderr.on('data',()=>{});child.stdout.on('error',()=>stop(session));child.stderr.on('error',()=>stop(session));child.stdin.on('error',()=>stop(session));child.once('error',()=>{send(session.socket,{type:'error',message:'Private terminal connection failed'});stop(session);});child.once('close',code=>{session.childClosed=true;session.childCode=code;clearTimeout(session.killTimer);send(session.socket,{type:'exit',code:Number.isInteger(code)?code:1});stop(session);confirmed(session);});
    write(session,{type:'start',provider:value.provider,cols:value.cols,rows:value.rows});if(session.ended){json(res,503,{error:'Private terminal unavailable'});return true;}json(res,201,issue(session));return true;
   }
   const session=sessions.get(value.sessionId);
   if(!session||session.owner!==own){json(res,404,{error:'Terminal session unavailable'});return true;}
-  if(path===api+'/attach'){if(session.socket){json(res,409,{error:'Terminal is already open'});return true;}session.last=now();json(res,200,issue(session));return true;}
-  if(path===api+'/end'){stop(session);json(res,200,{ok:true});return true;}
+  if(path===api+'/attach'){if(session.ended){json(res,409,{error:'Terminal cleanup is still pending'});return true;}if(session.socket){json(res,409,{error:'Terminal is already open'});return true;}session.last=now();json(res,200,issue(session));return true;}
+  if(path===api+'/end'){stop(session);if(await waitCleanup(session))json(res,200,{ok:true});else json(res,503,{error:'Terminal cleanup is still pending'});return true;}
   json(res,404,{error:'Unknown terminal action'});return true;
  }
  function upgrade(req,socket,head){
@@ -82,7 +95,7 @@ export function createTerminalBroker({origin,connection=null,spawnWorker=()=>ter
    ws.on('message',(bytes,binary)=>{
     reap();let value;try{if(binary)throw Error();value=JSON.parse(bytes.toString());if(!value||typeof value!=='object'||Array.isArray(value))throw Error();}catch{ws.close(1008,'Invalid message');return;}
     if(!session){
-     const candidate=sessions.get(value.sessionId);if(value.type!=='attach'||!candidate||candidate.owner!==own||candidate.socket||candidate.attachExpiry<=now()||!equal(value.attachment,candidate.attachment)){ws.close(1008,'Invalid attachment');return;}
+     const candidate=sessions.get(value.sessionId);if(value.type!=='attach'||!candidate||candidate.ended||candidate.owner!==own||candidate.socket||candidate.attachExpiry<=now()||!equal(value.attachment,candidate.attachment)){ws.close(1008,'Invalid attachment');return;}
      session=candidate;session.attachment=null;session.socket=ws;session.disconnected=null;session.last=now();clearTimeout(deadline);
      if(session.ready)send(ws,{type:'ready',provider:session.provider});for(const item of session.queue)if(!send(ws,item)){stop(session);break;}session.queue=[];session.queuedBytes=0;return;
     }
@@ -97,5 +110,5 @@ export function createTerminalBroker({origin,connection=null,spawnWorker=()=>ter
  function reap(){const at=now();for(const session of sessions.values())if(at-session.created>=MAX_SESSION_MS||at-session.last>=idleMs||session.disconnected!==null&&at-session.disconnected>=graceMs)stop(session);for(const [id,own] of owners)if(at-own.last>=14400000&&![...sessions.values()].some(s=>s.owner===own))owners.delete(id);}
  const timer=setInterval(reap,1000);timer.unref?.();
  function dispose(){if(disposed)return;disposed=true;clearInterval(timer);for(const session of sessions.values())stop(session);for(const ws of wss.clients)ws.terminate();wss.close();owners.clear();}
- return {handle,upgrade,dispose,reap,diagnostics:()=>({sessions:sessions.size,owners:owners.size})};
+ return {handle,upgrade,dispose,reap,diagnostics:()=>({sessions:sessions.size,owners:owners.size,stopping:[...sessions.values()].filter(s=>s.ended).length,quarantined:[...sessions.values()].filter(s=>s.quarantined).length})};
 }
