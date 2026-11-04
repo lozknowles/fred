@@ -37,16 +37,21 @@ export class SunComputer {
   const button=(text,fn)=>{const node=el('button',text,tools);node.type='button';node.onclick=fn;return node;};
   this.connectButton=button('Connect',()=>this.connect(false));this.resumeButton=button('Resume session',()=>this.connect(true));this.endButton=button('End session and sign out',()=>this.endSession());this.leaveButton=button('Leave',()=>this.close());
   this.status=el('p','Disconnected',shell);this.status.className='elsemesh-sun-status';this.status.setAttribute('role','status');this.status.setAttribute('aria-live','polite');
-  const help=el('p','Live official CLI. Sign in only in the provider browser page. Leave disconnects this screen; your session can resume for 60 seconds. End session signs out.',shell);help.className='elsemesh-sun-help';
+  const help=el('p','Live official CLI. Sign in in the provider browser page; paste its authorization code here only when the official CLI asks. User paste and selected-text copy are available; automatic clipboard access is blocked. Leave disconnects this screen; resume within 60 seconds. Temporary work is deleted when you end the session or it expires (30 minutes). End session removes sign-in from this temporary workstation, not your other devices.',shell);help.className='elsemesh-sun-help';
   this.links=el('div',null,shell);this.links.className='elsemesh-sun-links';this.links.setAttribute('aria-label','Official provider sign-in links');
   this.mount=el('div',null,shell);this.mount.className='elsemesh-sun-output';this.mount.setAttribute('aria-label','Live private terminal');
   this.dialog.addEventListener('keydown',e=>e.stopPropagation());this.dialog.addEventListener('keyup',e=>e.stopPropagation());
-  this.dialog.addEventListener('paste',e=>{e.preventDefault();e.stopPropagation();},{capture:true});
-  this.dialog.addEventListener('copy',e=>{e.preventDefault();e.stopPropagation();},{capture:true});
-  this.dialog.addEventListener('cut',e=>{e.preventDefault();e.stopPropagation();},{capture:true});
+  // Native user gestures stay inside the terminal; OSC52 cannot access clipboard.
+  for(const event of ['paste','copy','cut'])this.dialog.addEventListener(event,e=>e.stopPropagation());
   this.dialog.addEventListener('cancel',e=>{e.preventDefault();this.close();});this.doc.body.append(this.dialog);
   this.resize=()=>this.fitTerminal();this.win.addEventListener('resize',this.resize);
-  this.visibility=()=>{if(this.doc.visibilityState==='hidden')this.close({resume:false,keepSession:true});};this.doc.addEventListener('visibilitychange',this.visibility);
+  this.visibility=()=>{
+   if(!this.active)return;
+   if(this.doc.visibilityState==='hidden'){
+    ++this.generation;this.disconnect();this.clearTerminal();this.csrf=null;this.capabilities=null;this.busy=false;this.inputQueue=Promise.resolve();this.outputQueue=Promise.resolve();this.outputBudget={bytes:0};
+    if(this.session)this.session.resumeUntil=this.now()+60000;this.setStatus('Disconnected while hidden. Return here to resume within 60 seconds.');this.updateButtons();
+   }else void this.refreshCapabilities(this.generation);
+  };this.doc.addEventListener('visibilitychange',this.visibility);
   this.blur=()=>this.display.clear();this.focus=()=>{if(this.active&&this.terminal)this.display.attach(this.terminal);};this.win.addEventListener('blur',this.blur);this.win.addEventListener('focus',this.focus);
   this.updateButtons();
  }
@@ -75,7 +80,11 @@ export class SunComputer {
  async open(){
   if(this.active||this.disposed)return;const generation=++this.generation;this.active=true;this.busy=false;this.csrf=null;this.capabilities=null;this.inputQueue=Promise.resolve();this.outputBudget={bytes:0};
   this.app.input.suspend();this.doc.exitPointerLock?.();this.dialog.showModal();this.provider.focus();this.setStatus('Checking live AI terminal availability…');this.updateButtons();
-  this.heartbeat=setInterval(()=>{if(this.authorityPending)return;this.authorityPending=true;this.authorized(generation).finally(()=>{this.authorityPending=false;});this.display.draw();},100);
+  this.heartbeat=setInterval(()=>{if(this.authorityPending)return;this.authorityPending=true;this.authorized(this.generation).finally(()=>{this.authorityPending=false;});this.display.draw();},100);
+  if(!await this.authorized(generation))return;
+  return this.refreshCapabilities(generation);
+ }
+ async refreshCapabilities(generation=this.generation){
   if(!await this.authorized(generation))return;
   try{const result=await this.request('session',null,generation);if(!this.current(generation)||!result)return;
    if(result.available!==true||typeof result.csrf!=='string'||!result.csrf||!Array.isArray(result.providers))throw Error('AI terminal is unavailable on this server.');
@@ -90,10 +99,9 @@ export class SunComputer {
   if(this.terminal)return true;const loaded=await this.loadTerminal();
   if(!this.current(generation)){loaded.terminal.dispose();return false;}
   this.terminal=loaded.terminal;this.fit=loaded.fit;this.terminal.options.linkHandler={activate:(_event,url)=>this.openAuthLink(url)};
-  // OSC 52 must never write/read the system clipboard. Custom key handler also
-  // disables paste/copy shortcuts; no clipboard addon is loaded.
+  // Only deliberate native paste/copy gestures are allowed. Remote OSC52 never
+  // reads or writes the clipboard; no clipboard addon is loaded.
   this.osc=this.terminal.parser.registerOscHandler(52,()=>true);
-  this.terminal.attachCustomKeyEventHandler(e=>{const key=e.key.toLowerCase(),clipboard=(e.ctrlKey||e.metaKey)&&key==='v'||(e.metaKey||e.ctrlKey&&e.shiftKey)&&['c','x'].includes(key)||e.shiftKey&&['Insert','Delete'].includes(e.key);if(clipboard){e.preventDefault();return false;}return true;});
   this.terminal.open(this.mount);this.dataListener=this.terminal.onData(data=>this.enqueueInput(data,generation));
   this.renderListener=this.terminal.onRender(()=>this.display.markDirty());this.resizeListener=this.terminal.onResize(size=>this.sendResize(size,generation));
   this.display.attach(this.terminal);this.fitTerminal();return true;
@@ -129,7 +137,7 @@ export class SunComputer {
   this.inputQueue=this.inputQueue.then(async()=>{
    if(!await this.authorized(generation,true)||!this.ready||this.socket?.readyState!==1||this.socket!==sourceSocket||this.terminal!==sourceTerminal)return;
    const bytes=new TextEncoder().encode(data),socket=this.socket;
-   if(bytes.length>MAX_INPUT*16){this.setStatus('Input is too large. Paste is disabled.');return;}
+   if(bytes.length>MAX_INPUT*16){this.setStatus('Input is too large. Paste at most 64 KiB at a time.');return;}
    for(let offset=0;offset<bytes.length;offset+=MAX_INPUT){if(!this.current(generation)||this.socket!==socket)return;socket.send(JSON.stringify({type:'input',data:base64(bytes.subarray(offset,offset+MAX_INPUT))}));}
   }).catch(()=>{if(this.current(generation))this.setStatus('Terminal input failed.');});return this.inputQueue;
  }
@@ -163,7 +171,7 @@ export class SunComputer {
   const generation=this.generation;if(this.busy||!this.session||!this.csrf||!await this.authorized(generation,true))return false;
   if(this.busy||!this.session)return false;
   this.busy=true;this.updateButtons();try{const result=await this.request('end',{sessionId:this.session.sessionId},generation);if(!this.current(generation)||!result)return false;if(result.ok!==true)throw Error('Sign out was not confirmed.');
-   this.disconnect();this.session=null;this.clearTerminal();this.setStatus('Session ended and signed out.');return true;
+   this.disconnect();this.session=null;this.clearTerminal();this.setStatus('Session ended and local sign-in removed.');return true;
   }catch(error){if(this.current(generation))this.setStatus('Could not confirm sign out. Retry End session.');return false;}
   finally{if(this.current(generation)){this.busy=false;this.updateButtons();}}
  }
