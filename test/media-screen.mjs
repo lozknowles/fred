@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {parseYouTubeSelection,youtubeWatchURL} from '../src/world-runtime/YouTubeSelection.js';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
 import * as N from '../src/engine/index.js';
 import {Material} from '../src/engine/render/Material.js';
@@ -461,5 +462,57 @@ test('covered, partial, stale-render and clear picture preserve one advancing pl
   manager.update();assert.equal(frame.style.opacity,'1');assert.equal(manager.iframe,frame);assert.equal(manager.status.advancedSeconds,4);
   assert.equal(dom.messages.some(([data])=>/pauseVideo|seekTo|setVolume|setPlaybackRate/.test(data)),false);
   dom.doc.visibilityState='hidden';manager.heartbeat();assert.equal(manager.iframe,null);assert.equal(manager.status.state,'hidden-stopped');
+ }finally{manager.dispose();}
+});
+
+test('YouTube session parser accepts exact video routes and bounded link timestamps',()=>{
+ const id='N-V7VpmoPkU';
+ for(const input of [id,'https://www.youtube.com/watch?v='+id,'https://youtube.com/watch?v='+id,'https://m.youtube.com/watch?v='+id,'https://youtu.be/'+id,'https://www.youtube.com/shorts/'+id,'https://www.youtube.com/live/'+id,'https://www.youtube-nocookie.com/embed/'+id])assert.deepEqual(parseYouTubeSelection(input),{videoId:id,start:0,hasStart:false},input);
+ for(const [suffix,start]of [['?t=1h2m3s',3723],['?start=90',90],['#t=12',12],['?t=86400',86400],['?t=0',0]])assert.deepEqual(parseYouTubeSelection('https://youtu.be/'+id+suffix),{videoId:id,start,hasStart:true});
+ assert.equal(new URL(youtubeWatchURL({videoId:id,start:90})).searchParams.get('t'),'90');
+});
+test('YouTube selection rejects foreign hosts, credentials, ports, malformed IDs and unsafe timestamps',()=>{
+ const id='N-V7VpmoPkU';
+ for(const input of ['http://youtube.com/watch?v='+id,'https://youtube.com.evil.test/watch?v='+id,'https://evil.test/?v='+id,'https://user@youtube.com/watch?v='+id,'https://youtube.com:443/watch?v='+id,'https://youtube.com:444/watch?v='+id,'https://youtube.com./watch?v='+id,'https://youtube%2ecom/watch?v='+id,'https://you\ntube.com/watch?v='+id,'//youtube.com/watch?v='+id,'javascript:alert(1)','<img onerror=alert(1)>','https://www.youtube.com/playlist?list='+id,'https://www.youtube.com/watch?v='+id+'&v='+id,'https://youtu.be/'+id+'/extra','https://youtu.be/short','https://youtu.be/'+id+'?t=-1','https://youtu.be/'+id+'?t=1.5','https://youtu.be/'+id+'?t=86401','https://youtu.be/'+id+'?t=1&start=2','https://youtu.be/'+id+'?t=1#t=2','https://youtu.be/'+id+'?t=99999999999999999999999999'])assert.throws(()=>parseYouTubeSelection(input),undefined,input);
+});
+test('session selection replaces video at zero, clears error, ignores obsolete messages and preserves authored config',()=>{
+ const f=fixture(),dom=fakeDOM(),object={id:'tv',mediaScreen:{...config}},original=JSON.stringify(object);let allowed=true;
+ const manager=new MediaScreen({getContext:()=>({ready:true,active:f.active,key:'session',camera:f.camera,viewport:f.viewport}),isAuthorized:()=>allowed,isUnobstructed:()=>true,document:dom.doc,window:dom.win});
+ try{
+  manager.enter(object,f.active);manager.startPlayback();const old=manager.iframe;
+  const packet=(frame,info)=>({source:frame.contentWindow,origin:'https://www.youtube-nocookie.com',data:{event:'infoDelivery',info}});
+  manager.receive(packet(old,{playerState:1,currentTime:901}));manager.receive({source:old.contentWindow,origin:'https://www.youtube-nocookie.com',data:{event:'onError',info:150}});
+  assert.match(manager.note.textContent,/does not allow embedding/);assert.match(manager.watchLink.href,/N-V7VpmoPkU/);
+  manager.videoInput.value='https://youtu.be/dQw4w9WgXcQ';manager.play.onclick();const second=manager.iframe;
+  assert.notEqual(second,old);assert.equal(old.src,'about:blank');assert.equal(manager.status.currentTime,null);assert.equal(manager.status.advancedSeconds,0);assert.equal(manager.status.error,null);
+  assert.equal(new URL(second.src).searchParams.get('start'),'0');assert.match(new URL(second.src).pathname,/dQw4w9WgXcQ/);
+  manager.receive(packet(old,{playerState:1,currentTime:902}));assert.equal(manager.status.currentTime,null);
+  manager.receive(packet(second,{playerState:1,currentTime:3}));manager.play.onclick();assert.equal(new URL(manager.iframe.src).searchParams.get('start'),'3','same choice resumes elapsed time');
+  manager.videoInput.value='https://www.youtube.com/watch?v=N-V7VpmoPkU&t=1m2s';manager.play.onclick();assert.equal(new URL(manager.iframe.src).searchParams.get('start'),'62');assert.equal(manager.status.currentTime,null);
+  const third=manager.iframe;manager.videoInput.value='https://evil.test/watch?v=dQw4w9WgXcQ';manager.play.onclick();assert.equal(manager.iframe,third);assert.equal(manager.videoInput.attributes['aria-invalid'],'true');
+  manager.videoInput.value='dQw4w9WgXcQ';allowed=false;assert.equal(manager.playSelection(),false);assert.equal(manager.iframe,null);assert.equal(JSON.stringify(object),original);
+ }finally{manager.dispose();}
+});
+test('selection survives hidden/resume and reopening only within the same world generation and object',()=>{
+ const f=fixture(),dom=fakeDOM();let key='session';const manager=new MediaScreen({getContext:()=>({ready:true,active:f.active,key,camera:f.camera,viewport:f.viewport}),isAuthorized:()=>true,isUnobstructed:()=>true,document:dom.doc,window:dom.win});
+ try{
+  const object={id:'tv',mediaScreen:config};manager.enter(object,f.active);manager.videoInput.value='https://youtu.be/dQw4w9WgXcQ?t=30';manager.play.onclick();
+  manager.receive({source:manager.iframe.contentWindow,origin:'https://www.youtube-nocookie.com',data:{event:'infoDelivery',info:{playerState:2,currentTime:42}}});
+  dom.doc.visibilityState='hidden';dom.listeners.get('visibilitychange')();assert.equal(manager.iframe,null);assert.equal(manager.startPlayback(),false);
+  dom.doc.visibilityState='visible';manager.startPlayback();assert.match(manager.iframe.src,/dQw4w9WgXcQ/);assert.equal(new URL(manager.iframe.src).searchParams.get('start'),'42');
+  manager.exit();manager.enter(object,f.active);assert.match(manager.videoInput.value,/dQw4w9WgXcQ/);manager.exit();
+  manager.enter({...object,id:'other'},f.active);assert.match(manager.videoInput.value,/N-V7VpmoPkU/);manager.exit();
+  key='new-session';manager.enter(object,f.active);assert.match(manager.videoInput.value,/N-V7VpmoPkU/);
+ }finally{manager.dispose();}
+});
+test('TV controls label fields, contain keyboard events and open real YouTube search with noopener',()=>{
+ const f=fixture(),dom=fakeDOM(),opened=[];dom.win.open=(...args)=>opened.push(args);
+ const manager=new MediaScreen({getContext:()=>({ready:true,active:f.active,key:'session',camera:f.camera,viewport:f.viewport}),isAuthorized:()=>true,document:dom.doc,window:dom.win});
+ try{
+  manager.enter({id:'tv',mediaScreen:config},f.active);const children=manager.controls.children;
+  assert.equal(children[0].textContent,'YouTube video link');assert.equal(children[0].children[0],manager.videoInput);assert.equal(manager.play.textContent,'Play on TV');assert.equal(manager.note.attributes['aria-live'],'polite');
+  let stopped=0;manager.controls.onkeydown({stopPropagation(){stopped++;}});manager.controls.onkeyup({stopPropagation(){stopped++;}});assert.equal(stopped,2);
+  const label=children.find(e=>e.textContent==='Search YouTube'),button=children.find(e=>e.textContent==='Search YouTube (opens YouTube)');label.children[0].value='cats & dogs';button.onclick();
+  const [url,target,features]=opened[0];assert.equal(new URL(url).origin,'https://www.youtube.com');assert.equal(new URL(url).pathname,'/results');assert.equal(new URL(url).searchParams.get('search_query'),'cats & dogs');assert.equal(target,'_blank');assert.match(features,/noopener/);assert.equal(manager.iframe,null);
  }finally{manager.dispose();}
 });

@@ -1,3 +1,4 @@
+import {parseYouTubeSelection,youtubeWatchURL} from './YouTubeSelection.js';
 import {SkinBounds} from '../engine/render/SkinBounds.js';
 // Renderer-owned identity registration: mesh names/userData cannot grant exclusion.
 const rendererMediaSkies=new WeakMap();
@@ -397,7 +398,7 @@ export function mediaSightTiles(projection,camera,cache,{maxTiles=16}={}){
 export class MediaScreen {
  constructor({getContext,isAuthorized,isUnobstructed=()=>false,describeObstruction=()=>null,onEnter=()=>{},onExit=()=>{},document:doc=globalThis.document,window:win=globalThis.window}){
   Object.assign(this,{getContext,isAuthorized,isUnobstructed,describeObstruction,onEnter,onExit,doc,win});
-  this.active=null;this.iframe=null;this.controlsOpen=false;this.screenVisible=false;this.screenPartial=false;this.sightToken=0;this.sightKey=null;this.sightRelease=null;this.sightPending=false;this.sightError=null;
+  this.selections=new WeakMap();this.active=null;this.iframe=null;this.controlsOpen=false;this.screenVisible=false;this.screenPartial=false;this.sightToken=0;this.sightKey=null;this.sightRelease=null;this.sightPending=false;this.sightError=null;
   this.status={state:'closed',playerState:null,currentTime:null,advancedSeconds:0,error:null};
   this.message=e=>this.receive(e);win.addEventListener('message',this.message);
   this.visibility=()=>{if(doc.visibilityState==='hidden'){this.destroyPlayer();this.releaseSightTiles();this.status.state='hidden-stopped';}};
@@ -428,7 +429,10 @@ export class MediaScreen {
   this.exit();
   const c=this.getContext();
   if(!c?.ready||c.active!==active||!this.isAuthorized(object.id,'media.play'))throw Error('Access restricted');
-  this.active={object,active,key:c.key};
+  let choices=this.selections.get(active);
+  if(!choices||choices.key!==c.key){choices={key:c.key,objects:new Map()};this.selections.set(active,choices);}
+  const selected=choices.objects.get(object.id)??{videoId:object.mediaScreen.videoId,start:0};
+  this.active={object,active,key:c.key,selected};
   this.status={state:'awaiting-user-play',playerState:null,currentTime:null,advancedSeconds:0,error:null};
   this.openControls();
   return true;
@@ -437,23 +441,36 @@ export class MediaScreen {
   if(!this.active||this.controlsOpen)return;
   this.controlsOpen=true;
   this.controls=this.doc.createElement('div');
-  this.controls.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:10000;background:#14212bee;color:white;padding:12px;border-radius:10px;display:flex;gap:12px;align-items:center';
-  this.play=this.doc.createElement('button');
-  this.play.textContent=this.iframe?'Restart TV':this.sightError?'Retry TV':'Play on TV';
-  this.play.onclick=()=>this.startPlayback();
-  this.note=this.doc.createElement('span');
-  this.note.textContent=this.iframe?(this.status.state==='playing'?'Playing on TV. Return to the game to keep watching while you walk.':'TV player is starting. Use the player controls if needed.'):'Playback uses YouTube. Click Play to turn on the TV.';
+  this.controls.style.cssText='position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:10000;background:#14212bf5;color:white;padding:16px;border-radius:10px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;width:min(640px,calc(100vw - 24px));box-sizing:border-box;max-height:80dvh;overflow:auto;font:16px system-ui';
+  this.controls.setAttribute('role','region');this.controls.setAttribute('aria-label','TV controls');
+  // The runtime also suspends movement while controls are open.
+  this.controls.onkeydown=event=>event.stopPropagation();this.controls.onkeyup=event=>event.stopPropagation();
+  const label=this.doc.createElement('label');label.textContent='YouTube video link';label.style.cssText='display:flex;flex-direction:column;gap:6px;flex:1 1 100%;min-width:0';
+  this.videoInput=this.doc.createElement('input');this.videoInput.type='text';this.videoInput.value=youtubeWatchURL(this.active.selected);this.inputBaseline=this.videoInput.value;
+  this.videoInput.placeholder='https://www.youtube.com/watch?v=… or video ID';this.videoInput.maxLength=2048;
+  this.videoInput.style.cssText='font:inherit;padding:10px;min-width:0;width:100%;box-sizing:border-box';label.append(this.videoInput);
+  this.play=this.doc.createElement('button');this.play.textContent='Play on TV';this.play.onclick=()=>this.playSelection();
+  this.videoInput.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();event.stopPropagation();this.playSelection();}};
+  this.note=this.doc.createElement('span');this.note.setAttribute('role','status');this.note.setAttribute('aria-live','polite');this.note.style.cssText='flex:1 1 100%;overflow-wrap:anywhere';
+  this.note.textContent=this.status.error?(errors[this.status.error]??'YouTube playback failed.'):this.iframe?(this.status.state==='playing'?'Playing on TV. Return to the game to keep watching while you walk.':'TV player is starting. Use the player controls if needed.'):'Paste a video link or ID, then play. Link timestamps are supported. Playback uses YouTube.';
+  this.watchLink=this.doc.createElement('a');this.watchLink.textContent='Open selected video on YouTube';this.watchLink.href=youtubeWatchURL(this.active.selected);this.watchLink.target='_blank';this.watchLink.rel='noopener noreferrer';this.watchLink.style.color='#a9d9ff';
+  const searchLabel=this.doc.createElement('label');searchLabel.textContent='Search YouTube';searchLabel.style.cssText='display:flex;flex-direction:column;gap:6px;flex:1 1 260px;min-width:0';
+  const search=this.doc.createElement('input');search.type='search';search.maxLength=200;search.style.cssText='font:inherit;padding:10px;min-width:0';searchLabel.append(search);
+  const searchButton=this.doc.createElement('button');searchButton.textContent='Search YouTube (opens YouTube)';
+  searchButton.onclick=()=>{const query=search.value.trim();if(query){const url=new URL('https://www.youtube.com/results');url.searchParams.set('search_query',query);this.win.open(url.href,'_blank','noopener,noreferrer');}};
   const back=this.doc.createElement('button');back.textContent='Return to game';back.onclick=()=>this.closeControls();
   const stop=this.doc.createElement('button');stop.textContent='Stop TV';stop.onclick=()=>this.exit();
-  this.controls.append(this.play,this.note,back,stop);
+  for(const button of [this.play,searchButton,back,stop])button.style.cssText='font:inherit;min-height:44px;padding:8px 12px;cursor:pointer';
+  this.controls.append(label,this.play,this.note,this.watchLink,searchLabel,searchButton,back,stop);
   this.doc.body.append(this.controls);
   if(this.iframe)this.iframe.style.pointerEvents=this.screenVisible&&!this.screenPartial?'auto':'none';
   this.doc.exitPointerLock?.();
   this.onEnter();
+  this.videoInput.focus?.({preventScroll:true});
  }
  closeControls(){
   if(!this.controlsOpen)return;
-  this.controls?.remove();this.controls=null;this.controlsOpen=false;
+  this.controls?.remove();this.controls=null;this.videoInput=null;this.note=null;this.watchLink=null;this.play=null;this.controlsOpen=false;
   if(this.iframe)this.iframe.style.pointerEvents='none';
   this.onExit();
   if(!this.iframe){this.releaseSightTiles();this.active=null;this.status.state='closed';}
@@ -493,11 +510,26 @@ export class MediaScreen {
   const visibility=result===true?{visible:true,partial:false,mask:null}:result&&typeof result==='object'?result:{visible:false,partial:false,mask:null};
   return {c,projection,...visibility};
  }
- startPlayback(){
+ playSelection(){
+  if(!this.validatePlayback())return false;
+  let selected;try{selected=parseYouTubeSelection(this.videoInput.value);}catch(error){this.note.textContent=error.message;this.videoInput.setAttribute('aria-invalid','true');return false;}
+  this.videoInput.setAttribute('aria-invalid','false');
+  if(this.videoInput.value===this.inputBaseline)selected.hasStart=false;
+  const started=this.startPlayback(selected);if(started)this.inputBaseline=this.videoInput.value;return started;
+ }
+ startPlayback(selection=null){
+  if(!this.validatePlayback())return false;
   if(this.sightError)this.releaseSightTiles();
   const current=this.current();
   if(!current){this.exit();return false;}
+  const previous=this.active.selected,chosen=selection??previous;
+  const changed=chosen.videoId!==previous.videoId;
+  const start=changed||selection?.hasStart?chosen.start:this.status.currentTime??chosen.start;
   this.destroyPlayer();
+  this.active.selected={videoId:chosen.videoId,start:chosen.start};
+  this.selections.get(this.active.active).objects.set(this.active.object.id,this.active.selected);
+  if(changed||selection?.hasStart)this.status.currentTime=null;
+  if(this.watchLink)this.watchLink.href=youtubeWatchURL(this.active.selected);
   const frame=this.doc.createElement('iframe');
   frame.title='YouTube video on physical TV';frame.width='1280';frame.height='720';
   frame.allow='autoplay; encrypted-media; picture-in-picture';
@@ -509,7 +541,7 @@ export class MediaScreen {
   frame.style.maskImage=current.mask??'none';frame.style.webkitMaskImage=current.mask??'none';
   frame.style.clipPath=current.projection?.clipPath??'none';
   frame.style.pointerEvents=current.visible&&!current.partial&&this.controlsOpen?'auto':'none';
-  frame.src=youtubeEmbedURL(this.active.object.mediaScreen,this.win.location.origin,this.status.currentTime??0);
+  frame.src=youtubeEmbedURL({...this.active.object.mediaScreen,videoId:chosen.videoId},this.win.location.origin,start);
   this.iframe=frame;this.doc.body.append(frame);this.screenVisible=current.visible;this.screenPartial=!!current.partial;
   this.status.state='player-requested';this.status.error=null;this.status.playerState=null;this.status.advancedSeconds=0;
   if(this.note)this.note.textContent=current.visible?'TV player is starting. Use the player controls if autoplay is blocked.':'TV player is starting behind an obstruction; the picture will reappear when visible.';
@@ -541,7 +573,7 @@ export class MediaScreen {
   if(!current){this.exit();return;}
   if(!this.iframe)return;
   this.lastVisualAt=performance.now();
-  if(this.sightError){if(this.note)this.note.textContent=this.sightError+' Use the TV play control to retry.';if(this.play)this.play.textContent=this.iframe?'Restart TV':'Retry TV';}
+  if(this.sightError){if(this.note)this.note.textContent=this.sightError+' Use the TV play control to retry.';if(this.play)this.play.textContent='Play on TV';}
   this.screenVisible=current.visible;this.screenPartial=!!current.partial;
   this.iframe.style.opacity=current.visible?'1':'0';
   this.iframe.style.maskImage=current.mask??'none';this.iframe.style.webkitMaskImage=current.mask??'none';
@@ -559,6 +591,6 @@ export class MediaScreen {
   this.closeControls();
   this.active=null;this.status.state='closed';
  }
- diagnostics(){return {...this.status,activeObjectId:this.active?.object.id??null,iframePresent:!!this.iframe,controlsOpen:this.controlsOpen,screenVisible:this.screenVisible,screenPartial:this.screenPartial,visibilityLoading:this.sightPending,visibilityError:this.sightError,playbackScope:'local active world only',occlusion:'proven clear TV silhouette shown; playback continues behind obstructions',audioHeard:false};}
+ diagnostics(){return {...this.status,activeObjectId:this.active?.object.id??null,selectedVideoId:this.active?.selected.videoId??null,iframePresent:!!this.iframe,controlsOpen:this.controlsOpen,screenVisible:this.screenVisible,screenPartial:this.screenPartial,visibilityLoading:this.sightPending,visibilityError:this.sightError,playbackScope:'local active world only',occlusion:'proven clear TV silhouette shown; playback continues behind obstructions',audioHeard:false};}
  dispose(){this.exit();this.win.removeEventListener('message',this.message);this.doc.removeEventListener('visibilitychange',this.visibility);}
 }
