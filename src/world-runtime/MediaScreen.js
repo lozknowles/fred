@@ -398,11 +398,50 @@ export function mediaSightTiles(projection,camera,cache,{maxTiles=16}={}){
 export class MediaScreen {
  constructor({getContext,isAuthorized,isUnobstructed=()=>false,describeObstruction=()=>null,onEnter=()=>{},onExit=()=>{},document:doc=globalThis.document,window:win=globalThis.window}){
   Object.assign(this,{getContext,isAuthorized,isUnobstructed,describeObstruction,onEnter,onExit,doc,win});
-  this.selections=new WeakMap();this.active=null;this.iframe=null;this.controlsOpen=false;this.screenVisible=false;this.screenPartial=false;this.sightToken=0;this.sightKey=null;this.sightRelease=null;this.sightPending=false;this.sightError=null;
+  this.selections=new WeakMap();this.active=null;this.iframe=null;this.video=null;this.captureGeneration=0;this.capturePending=false;this.disposed=false;this.nativeBlurred=false;this.controlsOpen=false;this.screenVisible=false;this.screenPartial=false;this.sightToken=0;this.sightKey=null;this.sightRelease=null;this.sightPending=false;this.sightError=null;
   this.status={state:'closed',playerState:null,currentTime:null,advancedSeconds:0,error:null};
   this.message=e=>this.receive(e);win.addEventListener('message',this.message);
-  this.visibility=()=>{if(doc.visibilityState==='hidden'){this.destroyPlayer();this.releaseSightTiles();this.status.state='hidden-stopped';}};
+  this.visibility=()=>{if(!this.playbackContext()){if(this.active)this.exit();return;}if(doc.visibilityState==='hidden'){if(this.video)this.suspendSharedPresentation();else{this.destroyPlayer({cancelCapture:false});this.releaseSightTiles();this.status.state='hidden-stopped';}}else if(this.video)this.update();};
   doc.addEventListener('visibilitychange',this.visibility);
+  this.blur=()=>{this.nativeBlurred=true;if(this.video)this.suspendSharedPresentation();};
+  this.focus=()=>{this.nativeBlurred=false;if(this.video){if(!this.playbackContext())this.exit();else this.update();}};
+  this.teardown=()=>this.exit();
+  win.addEventListener('blur',this.blur);win.addEventListener('focus',this.focus);win.addEventListener('pagehide',this.teardown);win.addEventListener('unload',this.teardown);
+ }
+ get playerElement(){return this.video??this.iframe;}
+ suspendSharedPresentation(){
+  if(!this.video)return;this.video.pause();this.sharedPresentationPaused=true;this.video.muted=true;this.video.style.opacity='0';this.video.style.pointerEvents='none';this.screenVisible=false;this.screenPartial=false;this.releaseSightTiles();this.status.state='shared-tab-suspended';
+ }
+ openWebsite(){
+  try{const value=this.websiteInput.value.trim();if(value.length>2048||/[\u0000-\u0020\u007f]/.test(value))throw Error();const url=new URL(value);if(url.protocol!=='https:'||url.username||url.password)throw Error();this.websiteInput.setAttribute('aria-invalid','false');this.win.open(url.href,'_blank','noopener,noreferrer');}
+  catch{this.websiteInput?.setAttribute('aria-invalid','true');if(this.note)this.note.textContent='Enter a valid HTTPS website address without a username or password.';}
+ }
+ // Called synchronously by the button: browser permission always follows a user gesture.
+ shareBrowserTab(){
+  if(this.disposed||!this.playbackContext())return false;
+  const devices=this.win.navigator?.mediaDevices;
+  if(!devices?.getDisplayMedia){if(this.note)this.note.textContent='Browser tab sharing is unavailable in this browser.';return false;}
+  const generation=++this.captureGeneration,owner=this.active;this.capturePending=true;
+  if(!this.poll)this.poll=setInterval(()=>this.heartbeat(),500);
+  let request;
+  try{request=devices.getDisplayMedia({video:{displaySurface:'browser'},audio:false,selfBrowserSurface:'exclude',monitorTypeSurfaces:'exclude',surfaceSwitching:'exclude',systemAudio:'exclude'});}
+  catch{this.captureFailed(generation);return false;}
+  return Promise.resolve(request).then(stream=>{
+   const tracks=stream.getTracks(),videos=stream.getVideoTracks();
+   const valid=tracks.length===1&&videos.length===1&&tracks[0]===videos[0]&&videos[0].readyState==='live'&&videos[0].getSettings().displaySurface==='browser';
+   if(this.disposed||generation!==this.captureGeneration||this.active!==owner||!this.playbackContext()||!valid){for(const track of tracks)track.stop();if(generation===this.captureGeneration){this.captureFailed(generation,'Select a browser tab with video only.');if(!this.playbackContext())this.exit();}return false;}
+   const video=this.doc.createElement('video');video.width=1280;video.height=720;video.autoplay=true;video.playsInline=true;video.muted=true;video.title='Live shared browser tab on physical TV';
+   video.style.cssText='position:fixed;top:0;left:0;width:1280px;height:720px;border:0;transform-origin:0 0;z-index:25;background:#000;object-fit:contain;pointer-events:none;opacity:0';
+   video.srcObject=stream;
+   this.capturePending=false;this.destroyPlayer({cancelCapture:false});this.video=video;this.sharedPresentationPaused=true;
+   const ended=()=>{if(this.video===video)this.exit();};this.captureEnded=ended;this.captureTrack=videos[0];videos[0].addEventListener('ended',ended);
+   this.doc.body.append(video);this.status.state='shared-tab';this.status.error=null;
+   if(this.note)this.note.textContent='Live shared browser tab. Interact in the source tab; later navigation stays visible until Stop TV or Stop sharing.';
+   this.poll=setInterval(()=>this.heartbeat(),500);this.update();return true;
+  }).catch(()=>{this.captureFailed(generation);return false;});
+ }
+ captureFailed(generation,message='Browser tab sharing was cancelled or unavailable. Existing playback is unchanged.'){
+  if(generation!==this.captureGeneration)return;this.capturePending=false;if(!this.playerElement){clearInterval(this.poll);this.poll=null;}if(this.note)this.note.textContent=message;
  }
  releaseSightTiles(){
   ++this.sightToken;this.sightRelease?.();this.sightRelease=null;this.sightKey=null;this.sightPending=false;this.sightError=null;
@@ -460,8 +499,14 @@ export class MediaScreen {
   searchButton.onclick=()=>{const query=search.value.trim();if(query){const url=new URL('https://www.youtube.com/results');url.searchParams.set('search_query',query);this.win.open(url.href,'_blank','noopener,noreferrer');}};
   const back=this.doc.createElement('button');back.textContent='Return to game';back.onclick=()=>this.closeControls();
   const stop=this.doc.createElement('button');stop.textContent='Stop TV';stop.onclick=()=>this.exit();
-  for(const button of [this.play,searchButton,back,stop])button.style.cssText='font:inherit;min-height:44px;padding:8px 12px;cursor:pointer';
-  this.controls.append(label,this.play,this.note,this.watchLink,searchLabel,searchButton,back,stop);
+  const websiteLabel=this.doc.createElement('label');websiteLabel.textContent='Website URL';websiteLabel.style.cssText=label.style.cssText;
+  this.websiteInput=this.doc.createElement('input');this.websiteInput.type='url';this.websiteInput.maxLength=2048;this.websiteInput.placeholder='https://www.daliparis.com/en/';this.websiteInput.style.cssText=this.videoInput.style.cssText;websiteLabel.append(this.websiteInput);
+  const openWebsite=this.doc.createElement('button');openWebsite.textContent='Open website (new tab)';openWebsite.onclick=()=>this.openWebsite();
+  const share=this.doc.createElement('button');share.textContent='Share browser tab';share.onclick=()=>this.shareBrowserTab();
+  const sharingHelp=this.doc.createElement('span');sharingHelp.textContent='Live shared browser tab: open the website, then select that tab in the browser picker. Interact in the source tab; later navigation stays shared until Stop. Video only.';sharingHelp.style.cssText='flex:1 1 100%';
+  for(const button of [this.play,searchButton,openWebsite,share,back,stop])button.style.cssText='font:inherit;min-height:44px;padding:8px 12px;cursor:pointer';
+  this.controls.append(label,this.play,this.note,this.watchLink,searchLabel,searchButton,websiteLabel,openWebsite,share,sharingHelp,back,stop);
+  if(this.video)this.note.textContent='Live shared browser tab. Interact in the source tab; later navigation stays shared until Stop.';
   this.doc.body.append(this.controls);
   if(this.iframe)this.iframe.style.pointerEvents=this.screenVisible&&!this.screenPartial?'auto':'none';
   this.doc.exitPointerLock?.();
@@ -470,10 +515,10 @@ export class MediaScreen {
  }
  closeControls(){
   if(!this.controlsOpen)return;
-  this.controls?.remove();this.controls=null;this.videoInput=null;this.note=null;this.watchLink=null;this.play=null;this.controlsOpen=false;
+  this.controls?.remove();this.controls=null;this.videoInput=null;this.websiteInput=null;this.note=null;this.watchLink=null;this.play=null;this.controlsOpen=false;
   if(this.iframe)this.iframe.style.pointerEvents='none';
   this.onExit();
-  if(!this.iframe){this.releaseSightTiles();this.active=null;this.status.state='closed';}
+  if(!this.playerElement&&!this.capturePending){this.releaseSightTiles();this.active=null;this.status.state='closed';}
  }
  // This lease check is deliberately independent of projection, terrain leases,
  // and occlusion. Player events and the heartbeat must not compete with audio.
@@ -485,17 +530,21 @@ export class MediaScreen {
   return {c,matrix};
  }
  validatePlayback(){
-  if(this.doc.visibilityState==='hidden'){this.visibility();return false;}
   if(!this.playbackContext()){this.exit();return false;}
+  if(this.doc.visibilityState==='hidden'){this.visibility();return false;}
   return true;
  }
  heartbeat(){
-  if(!this.iframe||!this.validatePlayback())return;
+  if(!this.playerElement&&!this.capturePending)return;
+  if(!this.playbackContext()){this.exit();return;}
+  if(this.video&&(this.doc.visibilityState==='hidden'||this.nativeBlurred)){this.suspendSharedPresentation();return;}
+  if(this.doc.visibilityState==='hidden'){this.visibility();return;}
+  if(!this.playerElement)return;
   // A stopped render loop cannot keep an old positive visual proof on screen.
   // Hide only the picture; the existing player and its audio keep advancing.
   if(performance.now()-this.lastVisualAt>1000){
    this.screenVisible=false;this.screenPartial=false;
-   this.iframe.style.opacity='0';this.iframe.style.pointerEvents='none';
+   this.playerElement.style.opacity='0';this.playerElement.style.pointerEvents='none';
   }
   this.send({event:'listening',id:'elsemesh-tv',channel:'elsemesh-tv'});
   this.send({event:'command',func:'addEventListener',args:['onStateChange']});
@@ -568,21 +617,26 @@ export class MediaScreen {
  }
  update(){
   if(!this.active)return;
-  if(this.doc.visibilityState==='hidden'){this.destroyPlayer();this.releaseSightTiles();this.status.state='hidden-stopped';return;}
+  if(!this.playbackContext()){this.exit();return;}
+  if(this.video&&(this.doc.visibilityState==='hidden'||this.nativeBlurred)){this.suspendSharedPresentation();return;}
+  if(this.doc.visibilityState==='hidden'){this.destroyPlayer({cancelCapture:false});this.releaseSightTiles();this.status.state='hidden-stopped';return;}
   const current=this.current();
   if(!current){this.exit();return;}
-  if(!this.iframe)return;
+  const player=this.playerElement;if(!player)return;
+  if(this.video){this.status.state='shared-tab';if(this.sharedPresentationPaused){this.sharedPresentationPaused=false;const playing=this.video.play();playing?.catch?.(()=>{if(this.video===player&&this.note)this.note.textContent='Use Share browser tab again if this browser cannot display the shared tab.';});}}
   this.lastVisualAt=performance.now();
   if(this.sightError){if(this.note)this.note.textContent=this.sightError+' Use the TV play control to retry.';if(this.play)this.play.textContent='Play on TV';}
   this.screenVisible=current.visible;this.screenPartial=!!current.partial;
-  this.iframe.style.opacity=current.visible?'1':'0';
-  this.iframe.style.maskImage=current.mask??'none';this.iframe.style.webkitMaskImage=current.mask??'none';
-  this.iframe.style.clipPath=current.projection?.clipPath??'none';
-  this.iframe.style.pointerEvents=current.visible&&!current.partial&&this.controlsOpen?'auto':'none';
-  if(current.projection)this.iframe.style.transform=screenQuadTransform(current.projection.quad);
+  player.style.opacity=current.visible?'1':'0';
+  player.style.maskImage=current.mask??'none';player.style.webkitMaskImage=current.mask??'none';
+  player.style.clipPath=current.projection?.clipPath??'none';
+  player.style.pointerEvents=!this.video&&current.visible&&!current.partial&&this.controlsOpen?'auto':'none';
+  if(current.projection)player.style.transform=screenQuadTransform(current.projection.quad);
  }
- destroyPlayer(){
-  clearInterval(this.poll);this.poll=null;this.screenVisible=false;this.screenPartial=false;
+ destroyPlayer({cancelCapture=true}={}){
+  if(cancelCapture){++this.captureGeneration;this.capturePending=false;}
+  if(cancelCapture||!this.capturePending){clearInterval(this.poll);this.poll=null;}this.screenVisible=false;this.screenPartial=false;
+  if(this.video){const video=this.video;this.video=null;this.captureTrack?.removeEventListener('ended',this.captureEnded);this.captureTrack=null;this.captureEnded=null;video.pause();for(const track of video.srcObject?.getTracks()??[])track.stop();video.srcObject=null;video.remove();}
   if(this.iframe){this.send({event:'command',func:'pauseVideo',args:[]});this.iframe.src='about:blank';this.iframe.remove();this.iframe=null;}
  }
  exit(){
@@ -591,6 +645,6 @@ export class MediaScreen {
   this.closeControls();
   this.active=null;this.status.state='closed';
  }
- diagnostics(){return {...this.status,activeObjectId:this.active?.object.id??null,selectedVideoId:this.active?.selected.videoId??null,iframePresent:!!this.iframe,controlsOpen:this.controlsOpen,screenVisible:this.screenVisible,screenPartial:this.screenPartial,visibilityLoading:this.sightPending,visibilityError:this.sightError,playbackScope:'local active world only',occlusion:'proven clear TV silhouette shown; playback continues behind obstructions',audioHeard:false};}
- dispose(){this.exit();this.win.removeEventListener('message',this.message);this.doc.removeEventListener('visibilitychange',this.visibility);}
+ diagnostics(){return {...this.status,activeObjectId:this.active?.object.id??null,selectedVideoId:this.active?.selected.videoId??null,iframePresent:!!this.iframe,sharedTabPresent:!!this.video,sharePending:this.capturePending,controlsOpen:this.controlsOpen,screenVisible:this.screenVisible,screenPartial:this.screenPartial,visibilityLoading:this.sightPending,visibilityError:this.sightError,playbackScope:'local active world only',occlusion:'proven clear TV silhouette shown; playback continues behind obstructions',audioHeard:false};}
+ dispose(){this.disposed=true;this.exit();this.win.removeEventListener('message',this.message);this.doc.removeEventListener('visibilitychange',this.visibility);this.win.removeEventListener('blur',this.blur);this.win.removeEventListener('focus',this.focus);this.win.removeEventListener('pagehide',this.teardown);this.win.removeEventListener('unload',this.teardown);}
 }

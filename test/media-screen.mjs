@@ -80,6 +80,79 @@ test('fully onscreen TV keeps a proven clear region smaller than 64 pixels',()=>
 test('whole-screen occlusion includes non-colliding meshes and avatars; wall behind TV does not hide',()=>{const f=fixture(),back=new T.Mesh(new T.BoxGeometry(30,12,.3),new T.MeshBasicMaterial());back.position.set(0,6,-91);f.root.add(back);let result=collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'});assert(result.complete);assert(mediaScreenUnobstructed(f.projection,f.camera,result.bounds,result));const prop=new T.Mesh(new T.BoxGeometry(.5,.5,.5),new T.MeshBasicMaterial());prop.position.set(6.5,5,-86);prop.userData.collision='none';f.root.add(prop);result=collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'});assert.equal(mediaScreenUnobstructed(f.projection,f.camera,result.bounds,result),false);f.root.remove(prop);result=collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv',avatarRoots:[prop]});assert.equal(mediaScreenUnobstructed(f.projection,f.camera,result.bounds,result),false);assert.equal(mediaScreenUnobstructed(f.projection,f.camera,[],{complete:false}),false);});
 test('water proof requires installed enforcement and ALL five points strictly inside SAME bounded volume',()=>{const f=fixture(),water={surfaceExclusionsEnforced:true,surfaceExclusions:[volume]};assert(mediaScreenSurfaceExcluded({water},f.projection,f.camera));assert.equal(mediaScreenSurfaceExcluded({water:{...water,surfaceExclusionsEnforced:false}},f.projection,f.camera),false);assert.equal(mediaScreenSurfaceExcluded({water:{...water,surfaceExclusions:[{...volume,max:[Infinity,8.5,-63.5]}]}},f.projection,f.camera),false);const old=f.camera.position.y;f.camera.position.y=3.1+.025;assert.equal(mediaScreenSurfaceExcluded({water},f.projection,f.camera),false);f.camera.position.y=old;assert.equal(mediaScreenSurfaceExcluded({water:{...water,surfaceExclusions:[{...volume,max:[14.5,8.5,-85]},{...volume,id:'other',min:[-14.5,3.1,-85]}]}},f.projection,f.camera),false);});
 function fakeDOM(){const listeners=new Map(),messages=[];class Element{constructor(tag){this.tag=tag;this.style={};this.attributes={};this.children=[];this.contentWindow={postMessage:(...args)=>messages.push(args)};}append(...items){this.children.push(...items);}setAttribute(k,v){this.attributes[k]=v;}remove(){this.removed=true;}}const doc={body:new Element('body'),visibilityState:'visible',createElement:t=>new Element(t),exitPointerLock(){},addEventListener:(k,f)=>listeners.set(k,f),removeEventListener:k=>listeners.delete(k)},win={location:{origin:'http://localhost:18893'},addEventListener:(k,f)=>listeners.set(k,f),removeEventListener:k=>listeners.delete(k)};return {doc,win,listeners,messages};}
+function captureStream({surface='browser',count=1,audio=false,readyState='live'}={}){
+ const tracks=Array.from({length:count+(audio?1:0)},(_,i)=>({kind:i<count?'video':'audio',readyState,stops:0,listeners:new Map(),getSettings:()=>({displaySurface:surface}),stop(){this.stops++;this.readyState='ended';},addEventListener(k,fn){this.listeners.set(k,fn);},removeEventListener(k,fn){if(this.listeners.get(k)===fn)this.listeners.delete(k);}}));
+ return {tracks,getTracks:()=>tracks,getVideoTracks:()=>tracks.filter(t=>t.kind==='video')};
+}
+function sharingFixture(){
+ const f=fixture(),dom=fakeDOM(),create=dom.doc.createElement;dom.doc.createElement=tag=>{const element=create(tag);if(tag==='video'){element.plays=0;element.pauses=0;element.play=()=>{element.plays++;return Promise.resolve();};element.pause=()=>{element.pauses++;};}return element;};
+ let allowed=true,world=f.active,key='session',ready=true,resolve,reject;const requests=[];
+ dom.win.navigator={mediaDevices:{getDisplayMedia:options=>{requests.push(options);return new Promise((yes,no)=>{resolve=yes;reject=no;});}}};
+ const manager=new MediaScreen({getContext:()=>({ready,active:world,key,camera:f.camera,viewport:f.viewport}),isAuthorized:()=>allowed,isUnobstructed:()=>({visible:true,partial:true,mask:'occlusion-mask'}),document:dom.doc,window:dom.win});manager.enter({id:'tv',mediaScreen:config},f.active);
+ return {...dom,f,manager,requests,resolve:stream=>resolve(stream),reject:()=>reject(Error('Permission denied')),revoke(kind){if(kind==='authority')allowed=false;if(kind==='world')world={};if(kind==='generation')key='new-session';if(kind==='ready')ready=false;}};
+}
+test('live tab sharing follows the click, projects a separate video and survives Return to game',async()=>{
+ const f=sharingFixture(),m=f.manager;try{
+  m.startPlayback();const youtube=m.iframe,button=m.controls.children.find(e=>e.textContent==='Share browser tab');const result=button.onclick();assert.equal(f.requests.length,1,'permission request happens before click handler returns');
+  assert.deepEqual(f.requests[0],{video:{displaySurface:'browser'},audio:false,selfBrowserSurface:'exclude',monitorTypeSurfaces:'exclude',surfaceSwitching:'exclude',systemAudio:'exclude'});
+  const stream=captureStream();f.resolve(stream);assert.equal(await result,true);const video=m.video;
+  assert.equal(m.iframe,null);assert.equal(youtube.src,'about:blank');assert.equal(video.srcObject,stream);assert.equal(video.muted,true);assert.match(video.style.cssText,/object-fit:contain/);assert.match(video.style.transform,/matrix3d/);assert.equal(video.style.maskImage,'occlusion-mask');assert.equal(video.style.pointerEvents,'none');
+  m.closeControls();m.update();assert.equal(m.video,video);assert.equal(stream.tracks[0].stops,0);assert.equal(m.active.object.id,'tv');assert.equal(m.diagnostics().sharedTabPresent,true);
+  assert.equal(JSON.stringify(m.diagnostics()).includes('displaySurface'),false);m.exit();assert.equal(video.srcObject,null);assert.equal(video.removed,true);assert.equal(stream.tracks[0].stops,1);
+ }finally{m.dispose();}
+});
+test('invalid surfaces, ended tracks, extra video or audio stop every returned track and preserve YouTube',async()=>{
+ for(const options of [{surface:'monitor'},{surface:'window'},{surface:undefined,readyState:'ended'},{count:2},{audio:true}]){
+  const f=sharingFixture(),m=f.manager;try{m.startPlayback();const youtube=m.iframe,pending=m.shareBrowserTab(),stream=captureStream(options);f.resolve(stream);assert.equal(await pending,false);assert.equal(m.iframe,youtube);assert.equal(m.video,null);assert.ok(stream.tracks.every(track=>track.stops===1));}finally{m.dispose();}
+ }
+});
+test('permission denial leaves working playback and supports a fresh explicit retry',async()=>{
+ const f=sharingFixture(),m=f.manager;try{m.startPlayback();const youtube=m.iframe,pending=m.shareBrowserTab();f.reject();assert.equal(await pending,false);assert.equal(m.iframe,youtube);assert.equal(youtube.removed,undefined);const retry=m.shareBrowserTab(),stream=captureStream();f.resolve(stream);assert.equal(await retry,true);}finally{m.dispose();}
+});
+test('late permission results are stopped after Stop, disposal, lease revocation or YouTube replacement',async()=>{
+ for(const action of ['stop','dispose','authority','world','generation','ready','youtube']){
+  const f=sharingFixture(),m=f.manager;try{const pending=m.shareBrowserTab();if(action==='stop')m.exit();else if(action==='dispose')m.dispose();else if(action==='youtube')m.startPlayback();else{f.revoke(action);m.heartbeat();}
+   const youtube=m.iframe,stream=captureStream();f.resolve(stream);assert.equal(await pending,false,action);assert.equal(stream.tracks[0].stops,1,action);assert.equal(m.video,null);assert.equal(m.iframe,youtube);
+  }finally{m.dispose();}
+ }
+});
+test('latest permission wins and obsolete ended events cannot stop the replacement',async()=>{
+ const f=sharingFixture(),m=f.manager;try{
+  const first=m.shareBrowserTab(),resolveFirst=f.resolve; // capture the promise resolver before the next request
+  const firstResolver=f.win.navigator.mediaDevices.getDisplayMedia;
+  // Resolve the first request after its generation has become stale.
+  let resolveSecond;f.win.navigator.mediaDevices.getDisplayMedia=()=>new Promise(resolve=>{resolveSecond=resolve;});
+  const second=m.shareBrowserTab(),oldStream=captureStream(),stream=captureStream();resolveFirst(oldStream);assert.equal(await first,false);assert.equal(oldStream.tracks[0].stops,1);resolveSecond(stream);assert.equal(await second,true);
+  const oldEnded=stream.tracks[0].listeners.get('ended'),oldVideo=m.video;
+  f.win.navigator.mediaDevices.getDisplayMedia=firstResolver;const third=m.shareBrowserTab(),next=captureStream();f.resolve(next);assert.equal(await third,true);assert.equal(stream.tracks[0].listeners.size,0);assert.equal(stream.tracks[0].stops,1);oldEnded();assert.notEqual(m.video,oldVideo);assert.equal(m.video.srcObject,next);
+  next.tracks[0].readyState='ended';next.tracks[0].listeners.get('ended')();assert.equal(m.video,null);assert.equal(m.active,null);
+ }finally{m.dispose();}
+});
+test('hidden and native-blurred presentation retain consent, resume after lease checks and revoke while hidden',async()=>{
+ for(const revoke of [false,'authority','world']){
+  const f=sharingFixture(),m=f.manager;try{const pending=m.shareBrowserTab(),stream=captureStream();f.resolve(stream);await pending;const video=m.video;
+   f.listeners.get('blur')();assert.equal(video.style.opacity,'0');assert.ok(video.pauses>0);assert.equal(stream.tracks[0].stops,0);
+   f.listeners.get('focus')();assert.equal(video.style.opacity,'1');assert.ok(video.plays>1);
+   f.doc.visibilityState='hidden';f.listeners.get('visibilitychange')();m.heartbeat();assert.equal(m.video,video);assert.equal(video.style.opacity,'0');assert.equal(stream.tracks[0].stops,0);
+   if(revoke)f.revoke(revoke);m.heartbeat();
+   f.doc.visibilityState='visible';f.listeners.get('focus')();f.listeners.get('visibilitychange')();
+   if(revoke){assert.equal(m.video,null);assert.equal(stream.tracks[0].stops,1);}else{assert.equal(m.video,video);assert.equal(video.style.opacity,'1');assert.equal(f.requests.length,1);}
+  }finally{m.dispose();}
+ }
+});
+test('picker focus loss retains pending permission; page teardown and YouTube switching clear capture',async()=>{
+ const f=sharingFixture(),m=f.manager;try{const pending=m.shareBrowserTab();f.listeners.get('blur')();f.doc.visibilityState='hidden';f.listeners.get('visibilitychange')();m.heartbeat();assert.equal(m.capturePending,true);assert.ok(m.poll);
+  const stream=captureStream();f.resolve(stream);assert.equal(await pending,true);assert.equal(m.video.style.opacity,'0');f.doc.visibilityState='visible';f.listeners.get('focus')();m.startPlayback();assert.equal(stream.tracks[0].stops,1);assert.equal(m.video,null);assert.ok(m.iframe);
+  const retry=m.shareBrowserTab(),next=captureStream();f.resolve(next);await retry;f.listeners.get('pagehide')();assert.equal(next.tracks[0].stops,1);assert.equal(m.active,null);
+ }finally{m.dispose();}
+});
+test('website control opens safe HTTPS separately from capture and rejects credential or script URLs',()=>{
+ const f=sharingFixture(),m=f.manager,opened=[];f.win.open=(...args)=>opened.push(args);try{
+  const label=m.controls.children.find(e=>e.textContent==='Website URL');assert.equal(label.children[0],m.websiteInput);
+  for(const value of ['javascript:alert(1)','http://example.com','https://user:secret@example.com','https://exam\nple.com','//example.com']){m.websiteInput.value=value;m.openWebsite();assert.equal(m.websiteInput.attributes['aria-invalid'],'true');}
+  m.websiteInput.value='https://www.daliparis.com/en/';m.openWebsite();assert.deepEqual(opened,[['https://www.daliparis.com/en/','_blank','noopener,noreferrer']]);assert.equal(f.requests.length,0);assert.equal(m.video,null);
+ }finally{m.dispose();}
+});
 test('partial viewport and occlusion masks intersect, resize updates clipping, and access revocation destroys playback',()=>{
  const f=clippingFixture(3,0,-5,0,{left:100,top:50,width:640,height:360}),dom=fakeDOM(),active={matrices:new Map([['tv',f.matrix]])};
  let allowed=true,bounds=[{min:[1.4,-.1,-2.6],max:[1.6,.1,-2.4]}];
