@@ -86,8 +86,9 @@ export class AvatarChooser {
 		window.addEventListener('pagehide',stop);
 		this.dialog.querySelector('.save').onclick = async () => {
 			if(this.faceBusy) { this.status('Wait for your photo to finish loading.'); return; }
+			this.voice.stop();
 			this.saving=true;
-			const controls=[...this.dialog.querySelectorAll('button,input,select')].map(control=>[control,control.disabled]);
+			const controls=[...this.dialog.querySelectorAll('button,input,select,textarea')].map(control=>[control,control.disabled]);
 			for(const [control] of controls) control.disabled=true;
 			try {
 				await commitAvatarDraft({
@@ -113,26 +114,31 @@ export class AvatarChooser {
 			finally { for(const [control,disabled] of controls) control.disabled=disabled; this.saving=false; }
 		};
 		this.dialog.querySelector('.cancel').onclick = () => this.close(false);
+		this.dialog.addEventListener('close',()=>this.voice.stop());
 		this.dialog.addEventListener('cancel',event => { event.preventDefault(); this.close(false); });
 	}
 	createVoiceEditor() {
 		this.voiceLine=loadAvatarVoiceLine();
 		const section=document.createElement('section'); section.setAttribute('aria-label','Avatar voice');
-		section.innerHTML=`<h3>Loz voice</h3><p>Choose a prepared line to speak here. Save avatar keeps your choice. Press J while exploring to speak it again. Sound plays in this browser.</p><label for="elsemesh-avatar-voice">Spoken line</label><select id="elsemesh-avatar-voice"></select><div class="elsemesh-avatar-actions"><button type="button" class="voice-speak">Speak</button><button type="button" class="voice-stop" disabled>Stop</button></div><p class="voice-status" role="status" aria-live="polite"></p>`;
+		section.innerHTML=`<h3>Loz voice</h3><p>Type a line for your avatar to say in Loz’s voice. Text goes to the private voice service when you press Speak typed text. Typed text and audio stay in this session. Press J while exploring to replay your last spoken typed line. Sound plays in this browser.</p><label for="elsemesh-avatar-voice-text">What should your avatar say? (up to 180 characters)</label><textarea id="elsemesh-avatar-voice-text" maxlength="180" rows="3" style="box-sizing:border-box;width:100%;padding:10px;background:#153845;color:white;border:1px solid #62959a;border-radius:8px;font:inherit"></textarea><div class="elsemesh-avatar-actions"><button type="button" class="voice-typed">Speak typed text</button><button type="button" class="voice-play" disabled>Play typed line</button></div><label for="elsemesh-avatar-voice">Quick clip</label><select id="elsemesh-avatar-voice"></select><p>Save avatar keeps your quick clip choice. Speaking a quick clip makes J replay that clip.</p><div class="elsemesh-avatar-actions"><button type="button" class="voice-speak">Speak quick clip</button><button type="button" class="voice-stop" disabled>Stop</button></div><p class="voice-status" role="status" aria-live="polite"></p>`;
 		this.voiceSelect=section.querySelector('select');
 		for(const line of AVATAR_VOICE_LINES)this.voiceSelect.add(new Option(line.label,line.id));
 		this.voiceSelect.value=this.voiceLine;
-		this.voice=new AvatarVoice({onState:({playing,message})=>{
-			section.querySelector('.voice-stop').disabled=!playing;
+		this.voice=new AvatarVoice({onState:({playing,generating,ready,message})=>{
+			section.querySelector('.voice-stop').disabled=!(playing||generating);
+			section.querySelector('.voice-play').disabled=!ready;
+			section.setAttribute('aria-busy',String(!!generating));
 			section.querySelector('.voice-status').textContent=message;
 		}});
+		section.querySelector('.voice-typed').onclick=()=>{void this.voice.speakTyped(section.querySelector('textarea').value);};
+		section.querySelector('.voice-play').onclick=()=>{void this.voice.playTyped();};
 		section.querySelector('.voice-speak').onclick=()=>{void this.voice.speak(this.voiceSelect.value);};
 		section.querySelector('.voice-stop').onclick=()=>this.voice.stop();
 		this.voiceSelect.onchange=()=>this.voice.stop();
 		// Keep voice controls near the top on small screens, before photo editing.
 		this.dialog.querySelector('.elsemesh-avatar-fields').before(section);
 	}
-	speakVoice() {return this.voice.speak(this.voiceLine);}
+	speakVoice() {return this.voice.replay(this.voiceLine);}
 	createFaceEditor() {
 		const section=document.createElement('section'); section.setAttribute('aria-label','Local face photo');
 		section.innerHTML=`<h3>Face photo · this browser only</h3><p>Choose a clear front-facing portrait. Centre your face in the square and adjust the eyes and mouth on your character. This flat photo is applied to the front of the head. Face photos stay in this browser and are visible only on your own character.</p><label for="elsemesh-face-file">Local PNG, JPEG or WebP (up to 8 MB)</label><input id="elsemesh-face-file" type="file" accept="image/png,image/jpeg,image/webp"><canvas width="256" height="256" aria-label="Square photo crop preview" role="img" style="display:block;width:180px;height:180px;margin:12px 0;background:#173541"></canvas><p class="face-empty"></p><div class="face-controls"></div><button type="button" class="face-remove">Remove face photo</button>`;
