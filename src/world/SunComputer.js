@@ -1,6 +1,6 @@
 import {SunTerminalScreen} from './SunTerminalScreen.js';
 
-const AUTH_HOSTS=new Set(['auth.openai.com','chatgpt.com','claude.ai','console.anthropic.com']);
+const AUTH_HOSTS=new Set(['auth.openai.com','chatgpt.com','claude.ai','claude.com','console.anthropic.com']);
 const PROVIDERS=new Set(['codex','claude']);
 const MAX_INPUT=4096,MAX_OUTPUT_BASE64=131072;
 export function officialTerminalAuthURL(value){
@@ -160,13 +160,26 @@ export class SunComputer {
   }else if(message.type==='exit'){this.setStatus('Provider CLI exited'+(Number.isInteger(message.code)?' ('+message.code+')':'')+'.');this.disconnect();this.session=null;this.clearTerminal();this.updateButtons();}
   else if(message.type==='error')this.setStatus('Terminal server reported an error. Disconnect and retry.');
  }
- scanLinks(bytes){
-  this.decoder??=new TextDecoder();const text=(this.linkTail??'')+this.decoder.decode(bytes,{stream:true});this.linkTail=text.slice(-2048);
-  this.authLinks??=new Set();for(const match of text.matchAll(/https:\/\/[^\s\x00-\x20<>"']+(?=[\s\x00-\x20<>"'])/g)){
-   const raw=match[0].replace(/[).,;]+$/,'');const url=officialTerminalAuthURL(raw);if(!url||this.authLinks.has(url.href)||this.authLinks.size>=6)continue;
-   this.authLinks.add(url.href);const link=this.doc.createElement('a');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open official sign-in page · '+url.host;link.onclick=e=>{e.preventDefault();this.openAuthLink(url.href);};this.links.append(link);
-  }
+ offerAuthLink(raw){
+  const url=officialTerminalAuthURL(raw);this.authLinks??=new Set();if(!url||raw.length>8192||this.authLinks.has(url.href)||this.authLinks.size>=6)return;
+  this.authLinks.add(url.href);const link=this.doc.createElement('a');link.href=url.href;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open official sign-in page · '+url.host;link.onclick=e=>{e.preventDefault();this.openAuthLink(url.href);};this.links.append(link);
  }
+ scanLinks(bytes){
+  // Parse framing before finding plain URLs. OSC8 carries the complete URI even
+  // when its visible label is shortened or wrapped; that label is never a URL.
+  this.decoder??=new TextDecoder();const p=this.linkParser??={mode:'text',osc:'',label:false,plain:''};
+  const finishOSC=()=>{if(!p.oscOverflow&&p.osc.startsWith('8;')){const split=p.osc.indexOf(';',2);if(split>=0){const uri=p.osc.slice(split+1);p.label=!!uri;if(uri)this.offerAuthLink(uri);}}p.osc='';p.mode='text';};
+  for(const ch of this.decoder.decode(bytes,{stream:true})){
+   if(p.mode==='text'){if(ch==='\x1b')p.mode='escape';else if(!p.label)p.plain+=/[\x00-\x20\x7f]/.test(ch)?' ':ch;}
+   else if(p.mode==='escape'){p.mode=ch==='['?'csi':ch===']'?'osc':'text';if(p.mode==='osc'){p.osc='';p.oscOverflow=false;}}
+   else if(p.mode==='csi'){if(/[@-~]/.test(ch))p.mode='text';}
+   else if(p.mode==='osc'){if(ch==='\x07')finishOSC();else if(ch==='\x1b')p.mode='oscEscape';else if(p.osc.length<8192)p.osc+=ch;else p.oscOverflow=true;}
+   else if(p.mode==='oscEscape'){if(ch==='\\'||ch==='\x07')finishOSC();else{if(p.osc.length<8191)p.osc+='\x1b'+ch;else p.oscOverflow=true;p.mode='osc';}}
+  }
+  for(const match of p.plain.matchAll(/https:\/\/[^\s<>"']+(?=[\s<>"'])/g))this.offerAuthLink(match[0].replace(/[).,;]+$/,''));
+  const boundary=p.plain.lastIndexOf(' ');p.plain=(boundary>=0?p.plain.slice(boundary+1):p.plain).slice(-8192);this.linkTail=p.plain;
+ }
+
  openAuthLink(raw){const url=officialTerminalAuthURL(raw);if(!this.active||!url)return false;this.win.open(url.href,'_blank','noopener,noreferrer');return true;}
  async endSession(){
   const generation=this.generation;if(this.busy||!this.session||!this.csrf||!await this.authorized(generation,true))return false;
@@ -180,7 +193,7 @@ export class SunComputer {
  clearTerminal(){
   clearTimeout(this.retentionTimer);this.retentionTimer=null;
   for(const item of [this.dataListener,this.renderListener,this.resizeListener,this.osc])item?.dispose();this.dataListener=this.renderListener=this.resizeListener=this.osc=null;
-  this.terminal?.dispose();this.terminal=null;this.fit=null;this.mount.replaceChildren();this.links.replaceChildren();this.authLinks=null;this.linkTail='';this.decoder=null;this.display.clear();
+  this.terminal?.dispose();this.terminal=null;this.fit=null;this.mount.replaceChildren();this.links.replaceChildren();this.authLinks=null;this.linkParser=null;this.linkTail='';this.decoder=null;this.display.clear();
  }
  close({resume=true,keepSession=resume}={}){
   if(!this.active){if(!keepSession){this.session=null;this.clearTerminal();}return;}this.active=false;++this.generation;clearInterval(this.heartbeat);this.heartbeat=null;this.disconnect();if(keepSession&&this.session)this.retainTerminal();else{this.session=null;this.clearTerminal();}this.csrf=null;this.capabilities=null;this.busy=false;this.inputQueue=Promise.resolve();this.outputQueue=Promise.resolve();this.outputBudget={bytes:0};

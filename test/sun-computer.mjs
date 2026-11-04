@@ -44,8 +44,20 @@ function fixture(overrides={}){
 async function connected(f){await f.computer.open();assert.equal(await f.computer.connect(),true);const socket=f.sockets.at(-1);socket.open();await socket.message({type:'ready'});return socket;}
 
 test('Sun auth links allow exact official HTTPS hosts only; no ports or credentials',()=>{
- for(const host of ['auth.openai.com','chatgpt.com','claude.ai','console.anthropic.com'])assert.equal(officialTerminalAuthURL('https://'+host+'/login?q=1').host,host);
+ for(const host of ['auth.openai.com','chatgpt.com','claude.ai','claude.com','console.anthropic.com'])assert.equal(officialTerminalAuthURL('https://'+host+'/login?q=1').host,host);
  for(const value of ['http://auth.openai.com/','https://auth.openai.com.evil.test/','https://user@claude.ai/','https://chatgpt.com:443/','javascript:alert(1)','https://console%2eanthropic.com/','https://claude.ai./'])assert.equal(officialTerminalAuthURL(value),null,value);
+});
+test('Sun preserves complete OSC8 auth targets across packets and never offers shortened/wrapped labels',async t=>{
+ const full='https://claude.com/oauth/authorize?client_id=example-client&redirect_uri=https%3A%2F%2Fclaude.ai%2Foauth%2Fcallback&state=example-state&code_challenge=example-challenge';
+ for(const ending of ['\x07','\x1b\\']){
+  const f=fixture();t.after(()=>f.computer.dispose());const socket=await connected(f);
+  const framed='\x1b]8;id=test;'+full+ending+'\x1b[4m'+full.slice(0,90)+'\r\nshortened label\x1b[0m\x1b]8;;'+ending+'\r\n';
+  for(let offset=0;offset<framed.length;offset+=7)await socket.message({type:'output',data:encoded(framed.slice(offset,offset+7))});
+  assert.equal(f.computer.links.children.length,1);const link=f.computer.links.children[0];assert.equal(link.href,full);for(const key of ['state','client_id','redirect_uri','code_challenge'])assert.ok(new URL(link.href).searchParams.has(key));
+  link.onclick({preventDefault(){}});assert.equal(f.win.opened[0][0],full);f.computer.terminal.options.linkHandler.activate(null,full);assert.equal(f.win.opened[1][0],full,'explicit xterm link handler uses original full provider URI');
+  await socket.message({type:'output',data:encoded('\x1b]8;;https://claude.com.evil.test/login\x07https://auth.openai.com/fake-label\x1b]8;;\x07\n')});assert.equal(f.computer.links.children.length,1);
+  await socket.message({type:'output',data:encoded('\x1b]8;;https://claude.com/'+('x'.repeat(8300))+'\x07ignored\x1b]8;;\x07\n')});assert.equal(f.computer.links.children.length,1,'overflow cannot offer a truncated prefix');
+ }
 });
 test('Sun capability offline/no endpoint remains honest and never starts a CLI',async t=>{
  for(const mode of ['unavailable','missing','network']){
