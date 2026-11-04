@@ -74,7 +74,7 @@ export class SunComputer {
   const response=await this.fetch('/api/ai-terminal/'+path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',redirect:'error',
    headers:body?{'Content-Type':'application/json','X-Fred-Terminal-Token':csrf}:{},...(body?{body:JSON.stringify(body)}:{})});
   if(!this.current(generation))return null;
-  if(!response.ok)throw Error(response.status===404?'AI terminal is unavailable on this server.':'The AI terminal request failed.');
+  if(!response.ok){const error=Error(response.status===404?'AI terminal is unavailable on this server.':'The AI terminal request failed.');error.status=response.status;throw error;}
   return response.json();
  }
  async open(){
@@ -128,7 +128,7 @@ export class SunComputer {
    socket.onclose=()=>{if(this.socket!==socket||!this.current(generation))return;this.socket=null;this.session.resumeUntil=this.now()+60000;this.setStatus('Disconnected. Resume within 60 seconds.');this.clearTerminal();this.updateButtons();};
    socket.onerror=()=>{if(this.socket===socket&&this.current(generation))this.setStatus('Live terminal connection failed.');};
    this.setStatus('Connecting to live '+provider+' terminal…');return true;
-  }catch(error){if(this.current(generation)){this.setStatus(error.message);this.clearTerminal();}return false;}
+  }catch(error){if(this.current(generation)){if(resume&&error.status===404){this.session=null;this.setStatus('Your previous session has expired or ended. Connect to begin a new session.');}else this.setStatus(error.message);this.clearTerminal();}return false;}
   finally{if(this.current(generation)){this.busy=false;this.updateButtons();}}
  }
  dimensions(){return {cols:Math.max(20,Math.min(300,this.terminal?.cols??80)),rows:Math.max(20,Math.min(300,this.terminal?.rows??24))};}
@@ -172,7 +172,7 @@ export class SunComputer {
   if(this.busy||!this.session)return false;
   this.busy=true;this.updateButtons();try{const result=await this.request('end',{sessionId:this.session.sessionId},generation);if(!this.current(generation)||!result)return false;if(result.ok!==true)throw Error('Sign out was not confirmed.');
    this.disconnect();this.session=null;this.clearTerminal();this.setStatus('Session ended and local sign-in removed.');return true;
-  }catch(error){if(this.current(generation))this.setStatus('Could not confirm sign out. Retry End session.');return false;}
+  }catch(error){if(this.current(generation)){if(error.status===404){this.disconnect();this.session=null;this.clearTerminal();this.setStatus('Your previous session has expired or ended. Connect to begin a new session.');}else this.setStatus('Could not confirm sign out. Retry End session.');}return false;}
   finally{if(this.current(generation)){this.busy=false;this.updateButtons();}}
  }
  disconnect(){const socket=this.socket;this.socket=null;this.ready=false;if(socket){socket.onopen=socket.onmessage=socket.onerror=socket.onclose=null;socket.close(1000,'View disconnected');}}

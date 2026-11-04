@@ -106,3 +106,11 @@ test('Sun websocket handshake rechecks authority and failed end cannot claim suc
  const f=fixture();t.after(()=>f.computer.dispose());await f.computer.open();await f.computer.connect();f.setExecute(false);const socket=f.sockets[0];socket.open();await tick();assert.equal(socket.sent.length,0);assert.equal(socket.closed,true);assert.equal(f.computer.active,false);
  const g=fixture();t.after(()=>g.computer.dispose());await connected(g);const original=g.computer.fetch;g.computer.fetch=async(path,options)=>path.endsWith('/end')?{ok:false,status:503}:original(path,options);assert.equal(await g.computer.endSession(),false);assert.ok(g.computer.session);assert.match(g.computer.status.textContent,/Could not confirm sign out/);
 });
+test('Sun404Resume or End clears stale local identity and enables a fresh provider connection',async t=>{
+ for(const action of ['attach','end']){
+  const f=fixture();t.after(()=>f.computer.dispose());const socket=await connected(f);if(action==='attach'){f.computer.close();await f.computer.open();}
+  const original=f.computer.fetch;f.computer.fetch=async(path,options)=>path.endsWith('/'+action)?{ok:false,status:404}:original(path,options);
+  assert.equal(await(action==='attach'?f.computer.connect(true):f.computer.endSession()),false);assert.equal(f.computer.session,null);assert.equal(f.computer.socket,null);assert.equal(f.computer.terminal,null);assert.equal(f.computer.connectButton.disabled,false);assert.equal(f.computer.provider.disabled,false);assert.match(f.computer.status.textContent,/expired or ended/);assert.equal(socket.closed,true);
+  f.computer.provider.value='claude';assert.equal(await f.computer.connect(),true,'fresh provider connect must not wait for old60s expiry');
+ }
+});
