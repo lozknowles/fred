@@ -274,7 +274,9 @@ async function init(){
    const env=graphics.environment(host.environment()??{timeOfDay:14,cloudCoverage:.49,windSpeed:6,sunAzimuth:0});
     if(eyeActive||!app.freeCam)host.update(dt,time,{move:eyeActive||canMove,interact:!eyeActive&&canMove,environment:env,viewCamera:eyeFrame&&eyeFrame.target.worldId===host.active?.identity.worldId?eyeFrame.camera:engine.camera});
     if(canMove&&!eyeActive&&input.hit('KeyE')){const device=retro.nearest(engine.camera.position),tv=nearestMedia();if(device){const computer=host.active.project.objects.find(o=>o.id===device.objectId);if(computer)void openComputer(computer,host.active,device);else if(!ownerMode()){interactionContext=interactionState();retro.open(device);}else report('Access restricted');}else if(tv)void openMedia(tv,host.active);}
-   if(host.active&&!app.freeCam)followCamera.update(dt,host.active,{suspended:eyeActive||playerEyes?.panel.open||terminal.open||retro.active||!!media?.controlsOpen||controlsHelp.open||accessPanel.root.open||portals.pending});
+   // Opening a control panel can follow the player's first-person camera update
+   // in the same frame. Keep the chosen follow view while movement is suspended.
+   if(host.active&&!app.freeCam)followCamera.update(dt,host.active,{suspended:eyeActive||portals.pending});
    if(host.active)avatar.update(dt,host.active.player,engine.camera,app.freeCam||followCamera.enabled||eyeActive);else avatar.group.visible=false;
    portals.update(dt,time,{allowCrossing:!eyeActive,viewCamera:eyeFrame?.camera??engine.camera,viewWorldId:eyeFrame?.target.worldId??host.active?.identity.worldId});publicDuck?.update(dt);if(eyeActive){eyeFrame=playerEyes.controller.update();eyeActive=!!eyeFrame;}if(playerEyes&&performance.now()>=(playerEyes.nextPanelAt??0)){playerEyes.panel.refresh();playerEyes.nextPanelAt=performance.now()+250;}arrivals.update();portalEffects.update(dt,time);input.endFrame();
    let weatherState;const water=host.active?.project.water;
