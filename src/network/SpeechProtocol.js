@@ -1,13 +1,9 @@
 import { ONLINE_ROLES, PLAYER_IDS } from './PlayerProtocol.js';
+import { cleanSpeechText, MAX_SPEECH_LENGTH } from './SpeechText.js';
+export { cleanSpeechText, MAX_SPEECH_LENGTH } from './SpeechText.js';
 
 export const SPEECH_PROTOCOL = 'elsemesh.character-speech/1';
-export const MAX_SPEECH_LENGTH = 180;
 export const VOICE_PROFILES = Object.freeze(Object.fromEntries(ONLINE_ROLES.map((role) => [role, role === 'loz' ? 'loz-omnivoice' : 'guest-text'])));
-
-export function cleanSpeechText(value) {
-	if (typeof value !== 'string') return '';
-	return value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
-}
 
 export function makeSpeechEvent({ role, nodeId, text, messageId = crypto.randomUUID(), timestamp = Date.now() }) {
 	if (!Object.hasOwn(VOICE_PROFILES, role)) throw new Error('Invalid speech role');

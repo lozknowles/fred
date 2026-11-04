@@ -25,9 +25,12 @@ export class OmniVoiceSpeechProvider {
 			body: JSON.stringify({ representation: this.representation.toString('base64'), version: this.version, text }),
 		});
 		if (!response.ok) throw new Error(`OmniVoice worker returned ${response.status}`);
-		const data = await response.json();
+		const chunks=[]; let bytes=0;
+		for await(const chunk of response.body){bytes+=chunk.length;if(bytes>2_500_000)throw new Error('OmniVoice response exceeds audio limit');chunks.push(chunk);}
+		const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+		if(data.version!==this.version)throw new Error('OmniVoice response identity changed');
 		const audio = Buffer.from(data.audio || '', 'base64');
-		if (audio.length < 44 || audio.length > 1_800_000 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE') throw new Error('OmniVoice worker returned invalid WAV');
+		if (audio.length < 44 || audio.length > 1_800_000 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE' || audio.readUInt32LE(4)+8!==audio.length) throw new Error('OmniVoice worker returned invalid WAV');
 		return { audio, mime: 'audio/wav', provider: this.id, voiceProfile, profileId: this.profileId,
 			synthesisMs: Math.round(performance.now() - started), durationSeconds: data.metrics?.duration_s ?? null };
 	}

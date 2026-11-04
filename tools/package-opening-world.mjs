@@ -70,6 +70,9 @@ await fs.writeFile(path.join(output,'credits.html'),openingCredits.replaceAll('w
 const notices=[['LICENSE','LICENSE'],['src/world-runtime/vendor/THREE-LICENSE.txt','licenses/THREE-LICENSE.txt'],['src/world-runtime/vendor/FONT-LICENSE.txt','licenses/FONT-LICENSE.txt'],['src/world-runtime/vendor/ESBUILD-LICENSE.txt','licenses/ESBUILD-LICENSE.txt'],['src/vendor/basic-m6502/LICENSE','licenses/BASIC-M6502-LICENSE.txt']];
 for(const [from,to] of notices){const target=path.join(output,to);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(new URL('../'+from,import.meta.url),target);}
 await fs.writeFile(path.join(output,'opening-world.json'),JSON.stringify({...config,schema:'elsemesh.opening-world/2',bundlePath},null,2)+'\n');
-await fs.copyFile(new URL('./serve-opening-world.mjs',import.meta.url),path.join(output,'start-local.mjs'));
+const localServerFiles=['tools/serve-opening-world.mjs','tools/local-avatar-voice.mjs','src/network/SpeechText.js'];
+for(const name of localServerFiles){const target=path.join(output,'.fred-server',name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(new URL('../'+name,import.meta.url),target);}
+await fs.writeFile(path.join(output,'.fred-server/package.json'),'{"type":"module"}\n');
+await fs.writeFile(path.join(output,'start-local.mjs'),"import {fileURLToPath} from 'node:url';\nimport {startLocalWorldServer} from './.fred-server/tools/serve-opening-world.mjs';\nawait startLocalWorldServer({root:fileURLToPath(new URL('.',import.meta.url))});\n");
 await fs.writeFile(path.join(output,'.nojekyll'),'');
 console.log(JSON.stringify({worldId:config.worldId,repositoryCommit:source.ref,contentDigest:config.contentDigest,worldFiles:selected.length,worldBytes:total,output}));
