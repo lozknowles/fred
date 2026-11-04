@@ -2,6 +2,7 @@ import {collectNeonDiagnostics,FrameDiagnostics} from './FrameDiagnostics.js';
 import {updateRepositoryHud} from './RepositoryHud.js';
 import {walkingBlockMessage} from '../player/WalkingBlockReason.js';
 import './MobileControls.css';
+import '@xterm/xterm/css/xterm.css';
 import {GraphicsPanel} from './GraphicsPanel.js';
 import {installNeonShiftWorld} from './NeonShiftWorld.js';
 import {advanceNeonShiftClock} from './NeonShiftLayout.js';
@@ -165,8 +166,8 @@ async function init(){
    if(ownerMode()){if(!objectAccess.snapshot)await objectAccess.read();await objectAccess.use(computer.id);}
    if(host.active!==active||portals.pending||portals.authorityOffline)return;
    activeComputerId=computer.id;interactionContext=interactionState();
-   const retroDevice=device??active.project.terminals?.find(t=>t.objectId===computer.id&&t.kind==='c64');
-   if(retroDevice){retro.open(retroDevice);return;}
+   const retroDevice=device??active.project.terminals?.find(t=>t.objectId===computer.id&&['c64','sun'].includes(t.kind));
+   if(retroDevice&&retro.open(retroDevice))return;
    input._clearTransientInput();document.exitPointerLock?.();document.querySelector('#computer-info').textContent='Computer '+computer.id+' · '+(ownerMode()?'Owner session':installation.kind==='published'?'Single player':'Local preview')+' · sign '+(computer.computer.targetSignId??'not assigned');
    document.querySelector('#computer-controls').textContent='';terminal.showModal();window.dispatchEvent(new CustomEvent('repository-computer',{detail:{computer,active}}));
   }catch(error){report(error.message);}finally{interactionPending=false;}

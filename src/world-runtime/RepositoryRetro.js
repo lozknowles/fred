@@ -1,4 +1,5 @@
 import { C64Computer } from '../world/C64Computer.js';
+import { SunComputer } from '../world/SunComputer.js';
 import { makeRetroScreenMaterial } from '../world/PortalRetroScreens.js';
 import { buildRecipe } from '../world/PortalInteriorRecipe.js';
 let screens;
@@ -12,7 +13,7 @@ export class RepositoryRetro{
  get active(){return [...this.computers.values()].some(c=>c.active);}
  setWorld(active){if(active===this.activeWorld)return;this.clear();this.activeWorld=active;}
  nearest(cameraPosition){let found=null,best=Infinity;for(const t of this.activeWorld?.project.terminals??[]){const d=Math.hypot(...t.position.map((v,i)=>v-cameraPosition.getComponent(i)));if(d<t.interactionRadius&&d<best){found=t;best=d;}}return found;}
- open(terminal){if(terminal.kind!=='c64')return false;let computer=this.computers.get(terminal.id);if(!computer){computer=new C64Computer({input:this.input,canResume:this.canResume,canCommand:this.canCommand,canExecute:this.canExecute});this.computers.set(terminal.id,computer);}computer.open();return true;}
- clear({resume=false}={}){for(const computer of this.computers.values()){if(computer.active)computer.close({resume});computer.dialog.remove();}this.computers.clear();this.activeWorld=null;}
+ open(terminal){if(!['c64','sun'].includes(terminal.kind))return false;let computer=this.computers.get(terminal.id);if(!computer){const world=this.activeWorld,Computer=terminal.kind==='sun'?SunComputer:C64Computer;computer=new Computer({input:this.input,canResume:this.canResume,canCommand:this.canCommand,canExecute:this.canExecute,onScreen:canvas=>{if(this.activeWorld!==world)return;world?.root?.traverse(mesh=>{if(mesh.userData?.editorObjectIds?.includes(terminal.screenObjectId))mesh.userData.updateSunScreen?.(canvas);});}});this.computers.set(terminal.id,computer);}void computer.open();return true;}
+ clear({resume=false}={}){for(const computer of this.computers.values()){if(computer.active)computer.close({resume});if(computer.dispose)computer.dispose();else computer.dialog.remove();}this.computers.clear();this.activeWorld=null;}
  dispose(){this.clear();}
 }

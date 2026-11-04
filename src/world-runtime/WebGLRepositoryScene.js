@@ -139,7 +139,7 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
   }
   const ambient=createRepositoryAmbientBehaviour(project,{terrain:candidate.terrain});candidate.ambient=ambient;
   const groups=new Map(),cache=new Map(),sourceBytes=new Map(),screensByObject=new Map((project.terminals??[]).filter(t=>t.screenObjectId).map(t=>[t.screenObjectId,t.kind]));
-  for(const object of allObjects.filter(o=>o.kind==='glb'&&effectiveObjectState(allObjects,o.id).visible)){const kind=screensByObject.get(object.id),key=object.assetId+JSON.stringify(object.materialOverrides??[])+(kind??'')+(object.landscapeChunk??'');if(!groups.has(key))groups.set(key,{objects:[],kind});groups.get(key).objects.push(object);}
+  for(const object of allObjects.filter(o=>o.kind==='glb'&&effectiveObjectState(allObjects,o.id).visible)){const kind=screensByObject.get(object.id),key=object.assetId+JSON.stringify(object.materialOverrides??[])+(kind??'')+(kind==='sun'?object.id:'')+(object.landscapeChunk??'');if(!groups.has(key))groups.set(key,{objects:[],kind});groups.get(key).objects.push(object);}
   for(const {objects,kind}of groups.values()){
    const first=objects[0],asset=project.assets.find(a=>a.id===first.assetId);if(!asset)throw Error('Missing asset '+first.assetId);
    let loaded=cache.get(asset.id);if(!loaded){const response=await fetch(asset.dataUrl);if(!response.ok)throw Error('Asset read failed');const bytes=new Uint8Array(await response.arrayBuffer());loaded=await inspectAndLoadAsset(bytes.buffer);if(options.loaded?.source?.textureTierRead&&textureTierReferences(asset).length)sourceBytes.set(asset.id,bytes);cache.set(asset.id,loaded);candidate.loadedAssets.add(loaded);}
@@ -152,6 +152,7 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
      const slot=loaded.materialIndices.get(part.material)??-1;let material=retro??materialCache.get(part.material);
      if(!material){material=part.material.clone();const override=first.materialOverrides?.find(o=>o.materialIndex===slot);if(override?.color!==undefined)material.color.set(override.color);if(override?.roughness!==undefined)material.roughness=override.roughness;if(override?.metalness!==undefined)material.metalness=override.metalness;materialCache.set(part.material,material);}
      const mesh=new T.InstancedMesh(part.geometry,material,objects.length);mesh.userData.editorObjectIds=objects.map(o=>o.id);
+     if(kind==='sun')mesh.userData.updateSunScreen=canvas=>{if(material.map.image!==canvas){const previous=material.map;material.map=new T.CanvasTexture(canvas);material.map.colorSpace=T.SRGBColorSpace;material.needsUpdate=true;previous.dispose();}else material.map.needsUpdate=true;};
      for(let i=0;i<objects.length;i++){mesh.setMatrixAt(i,matrices.get(objects[i].id));if(objects[i].landscapeTint)mesh.setColorAt(i,new T.Color().fromArray(objects[i].landscapeTint));}mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;ambient.register(mesh,objects,matrices);root.add(mesh);primitives++;
      if(descriptor.worldId===warehouseDepthWorld&&project.nativeIsland&&warehouseDepthAssets.has(asset.id)&&!kind&&objects.every(object=>!object.ambientBehaviour&&!object.materialOverrides?.length)&&isEligibleWebGLDepthOccluder(mesh))candidate.depthOccluders.push(mesh);
     }
