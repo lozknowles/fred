@@ -21,9 +21,26 @@ export function convertNativePlantGeometry(source,{leafStride=1}={}){
  geometry.setIndex(indices);geometry.computeBoundingSphere();return geometry;
 }
 export function webGLNativeTerrainTile(data,tile,step=1){
- const nx=Math.ceil(tile.width/step)+1,nz=Math.ceil(tile.height/step)+1,positions=new Float32Array(nx*nz*3),uv=new Float32Array(nx*nz*2),indices=[];
- for(let z=0;z<nz;z++)for(let x=0;x<nx;x++){const gx=Math.min(data.res-1,tile.x+Math.min(tile.width,x*step)),gz=Math.min(data.res-1,tile.z+Math.min(tile.height,z*step)),i=z*nx+x;positions.set([data.origin+(gx+.5)*data.texel,data.heights[gz*data.res+gx],data.origin+(gz+.5)*data.texel],i*3);uv.set([x/(nx-1),z/(nz-1)],i*2);if(x<nx-1&&z<nz-1)indices.push(i,i+nx,i+1,i+1,i+nx,i+nx+1);}
- const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.BufferAttribute(positions,3));geometry.setAttribute('uv',new T.BufferAttribute(uv,2));geometry.setIndex(indices);geometry.computeVertexNormals();return geometry;
+ const nx=Math.ceil(tile.width/step)+1,nz=Math.ceil(tile.height/step)+1,positions=new Float32Array(nx*nz*3),uv=new Float32Array(nx*nz*2),indices=new (nx*nz-1>=65535?Uint32Array:Uint16Array)((nx-1)*(nz-1)*6);
+ let cursor=0;
+ for(let z=0;z<nz;z++)for(let x=0;x<nx;x++){const gx=Math.min(data.res-1,tile.x+Math.min(tile.width,x*step)),gz=Math.min(data.res-1,tile.z+Math.min(tile.height,z*step)),i=z*nx+x;positions[i*3]=data.origin+(gx+.5)*data.texel;positions[i*3+1]=data.heights[gz*data.res+gx];positions[i*3+2]=data.origin+(gz+.5)*data.texel;uv[i*2]=x/(nx-1);uv[i*2+1]=z/(nz-1);if(x<nx-1&&z<nz-1){indices[cursor++]=i;indices[cursor++]=i+nx;indices[cursor++]=i+1;indices[cursor++]=i+1;indices[cursor++]=i+nx;indices[cursor++]=i+nx+1;}}
+ const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.BufferAttribute(positions,3));geometry.setAttribute('uv',new T.BufferAttribute(uv,2));geometry.setIndex(new T.BufferAttribute(indices,1));geometry.computeVertexNormals();return geometry;
+}
+/** Fine tiles own their interior, and borrow only the inclusive east/south seam.
+ * A newly applied tile can therefore change resident west/north/northwest seams.
+ * Keep geometry and attributes resident; normal summation stays exactly Three's.
+ */
+export function updateWebGLNativeTerrainSeam(data,tile,geometry,incoming){
+ if(tile.id===incoming.id||tile.x>incoming.x+incoming.width-1||tile.z>incoming.z+incoming.height-1||tile.x+tile.width<incoming.x||tile.z+tile.height<incoming.z)return false;
+ const nx=tile.width+1,nz=tile.height+1,position=geometry.attributes.position,p=position.array;let changed=false;
+ const update=(x,z)=>{const gx=Math.min(data.res-1,tile.x+x),gz=Math.min(data.res-1,tile.z+z);if(gx<incoming.x||gx>=incoming.x+incoming.width||gz<incoming.z||gz>=incoming.z+incoming.height)return;const i=(z*nx+x)*3+1,h=data.heights[gz*data.res+gx];if(p[i]!==h){p[i]=h;changed=true;}};
+ for(let z=0;z<nz-1;z++)update(nx-1,z);
+ for(let x=0;x<nx;x++)update(x,nz-1);
+ if(!changed)return false;
+ position.needsUpdate=true;geometry.computeVertexNormals();
+ if(geometry.boundingBox!==null)geometry.computeBoundingBox();
+ if(geometry.boundingSphere!==null)geometry.computeBoundingSphere();
+ return true;
 }
 function texture(data,res,channels=4,type=T.UnsignedByteType){const value=new T.DataTexture(data,res,res,channels===4?T.RGBAFormat:T.RedFormat,type);value.magFilter=value.minFilter=type===T.FloatType?T.NearestFilter:T.LinearFilter;value.generateMipmaps=false;value.flipY=false;value.needsUpdate=true;return value;}
 async function barkTextures(source){
@@ -354,8 +371,7 @@ export async function buildWebGLNativeIsland({project,root,camera,options={}}){
   const windDirection = source.ocean.fft.local.windDirection * Math.PI / 180;
   const materialFor=(normal,splat,rect,coarse)=>terrainMaterial({normal,splat,rect,domain:source.domain,detail,shore,grass,ready,coarse,time,windDirection});
   const base=new T.Mesh(webGLNativeTerrainTile(data,{x:0,z:0,width:data.res-1,height:data.res-1},Math.round(data.res/source.coarse.res)),materialFor(coarseNormal,coarseSplat,[data.origin,data.origin,data.size,data.size],true));base.userData.nativeBase=true;group.add(base);
-  const updateTileGeometry=tile=>{const mesh=tileMeshes.get(tile.id);if(!mesh)return;mesh.geometry.dispose();mesh.geometry=webGLNativeTerrainTile(data,tile);};
-  cache=new NativeIslandTiles({tiles:source.tiles,readTile:source.readTile,maxBytes:options.maxBytes,maxConcurrency:options.maxConcurrency,onLoad(tile,decoded){const fields=decoded.fields??decoded;data.apply(tile,decoded);const normal=texture(fields.normal,tile.width),splat=texture(fields.splat,tile.width),mesh=new T.Mesh(webGLNativeTerrainTile(data,tile),materialFor(normal,splat,[data.origin+tile.x,data.origin+tile.z,tile.width,tile.height],false));mesh.userData.nativeTextures=[normal,splat];tileMeshes.set(tile.id,mesh);group.add(mesh);readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=255;ready.needsUpdate=true;for(const other of source.tiles)if(Math.abs(other.x-tile.x)<=128&&Math.abs(other.z-tile.z)<=128)updateTileGeometry(other);},onEvict(tile){const mesh=tileMeshes.get(tile.id);if(mesh){mesh.removeFromParent();mesh.geometry.dispose();mesh.material.dispose();mesh.userData.nativeTextures.forEach(t=>t.dispose());tileMeshes.delete(tile.id);}readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=0;ready.needsUpdate=true;}});data.cache=cache;
+  cache=new NativeIslandTiles({tiles:source.tiles,readTile:source.readTile,maxBytes:options.maxBytes,maxConcurrency:options.maxConcurrency,onLoad(tile,decoded){const fields=decoded.fields??decoded;data.apply(tile,decoded);const normal=texture(fields.normal,tile.width),splat=texture(fields.splat,tile.width),mesh=new T.Mesh(webGLNativeTerrainTile(data,tile),materialFor(normal,splat,[data.origin+tile.x,data.origin+tile.z,tile.width,tile.height],false));mesh.userData.nativeTextures=[normal,splat];tileMeshes.set(tile.id,mesh);group.add(mesh);readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=255;ready.needsUpdate=true;for(const other of source.tiles){const resident=tileMeshes.get(other.id);if(resident)updateWebGLNativeTerrainSeam(data,other,resident.geometry,tile);}},onEvict(tile){const mesh=tileMeshes.get(tile.id);if(mesh){mesh.removeFromParent();mesh.geometry.dispose();mesh.material.dispose();mesh.userData.nativeTextures.forEach(t=>t.dispose());tileMeshes.delete(tile.id);}readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=0;ready.needsUpdate=true;}});data.cache=cache;
   const wind={value:new T.Vector2(Math.sin(windDirection),Math.cos(windDirection))},gust={value:new T.Vector2()};
   const materials=plantMaterials={palm:plantMaterial('palm',time,wind,gust,detail,bark.palm,leafAtlas),tree:plantMaterial('tree',time,wind,gust,detail,bark.tree,leafAtlas)};plants=buildPlants(source,time,detail,materials,options.mainCamera??camera);group.add(plants.root);water=buildWebGLNativeSea(source,data,time,shore,coarseHeight);group.add(water.mesh);sky=buildWebGLNativeSky(project.environment);group.add(sky.mesh);
   const frustum=new T.Frustum(),vp=new T.Matrix4(),box=new T.Box3(),bindView=viewCamera=>{sky.update(time.value,viewCamera);viewCamera.updateMatrixWorld();vp.multiplyMatrices(viewCamera.projectionMatrix,viewCamera.matrixWorldInverse);frustum.setFromProjectionMatrix(vp);const {x,z}=viewCamera.position;cache.requestView(x,z,2400,tile=>{box.min.set(tile.bounds[0],tile.minHeight??-90,tile.bounds[1]);box.max.set(tile.bounds[2],tile.maxHeight??200,tile.bounds[3]);return frustum.intersectsBox(box)||Math.hypot((tile.bounds[0]+tile.bounds[2])/2-x,(tile.bounds[1]+tile.bounds[3])/2-z)<180;});plants.updateView(viewCamera);};

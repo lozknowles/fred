@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
 import {isEligibleWebGLDepthOccluder} from '../src/world-runtime/WebGLOpaqueDepthPrepass.js';
-import {createWarehouseSurfaces,warehouseSurfaceSpec,warehouseSurfaceBatchKey,WAREHOUSE_SURFACE_WORLD,WAREHOUSE_RECIPE_SOURCE} from '../src/world-runtime/WarehouseSurfaces.js';
+import {createWarehouseSurfaces,warehouseSurfaceSpec,warehouseSurfaceBatchKey,warehouseAlbedoMeans,WAREHOUSE_SURFACE_WORLD,WAREHOUSE_RECIPE_SOURCE} from '../src/world-runtime/WarehouseSurfaces.js';
 
 const asset={id:'warehouse:box-brick',source:WAREHOUSE_RECIPE_SOURCE};
 const object={id:'warehouse:object:0020',name:'east wall'};
@@ -57,4 +57,30 @@ test('a failed family closes successful sibling decodes exactly once',async()=>{
  const surfaces=createWarehouseSurfaces({fetchImage:async()=>{if(++reads===2)throw Error('decode failed');const b=bitmap();images.push(b);return b;}});
  await assert.rejects(surfaces.ready('fabric'),/decode failed/);assert.deepEqual(images.map(b=>b.closes),[1,1]);
  surfaces.dispose();assert.deepEqual(images.map(b=>b.closes),[1,1]);
+});
+test('coloured albedo detail preserves the authored mean reflectance and upholstery differences',async()=>{
+ const surfaces=createWarehouseSurfaces({fetchImage:async()=>bitmap()}),geometry=new T.BoxGeometry(),matrix=new T.Matrix4();
+ const colours={brick:'#70453b',polishedTile:'#30302e',wood:'#765238',fabric:'#8f8578',charcoal:'#303332',rugLight:'#a89a86'};
+ for(const [name,color]of Object.entries(colours)){
+  const s=warehouseSurfaceSpec(WAREHOUSE_SURFACE_WORLD,{...asset,id:'warehouse:box-'+name},object),m=new T.MeshStandardMaterial({color});
+  const authored=m.color.clone(),maps=await surfaces.ready(s.family);surfaces.apply(s,geometry,m,matrix,maps,1);
+  const mean=warehouseAlbedoMeans[s.family];
+  for(const [axis,i]of [['r',0],['g',1],['b',2]]){
+   assert.ok(Math.abs(m.color[axis]*mean[i]-authored[axis])<1e-12,name+' '+axis+' mean');
+   assert.ok(Math.abs((m.color[axis]*mean[i]*1.2)/(m.color[axis]*mean[i]*.8)-1.5)<1e-12,name+' detail contrast');
+  }
+  m.dispose();
+ }
+ surfaces.dispose();geometry.dispose();
+});
+test('authored steel/rust scratches use no textures or batching split and retain base colour',async()=>{
+ const surfaces=createWarehouseSurfaces({fetchImage:async()=>{throw Error('metal must not load maps');}}),geometry=new T.BoxGeometry();
+ for(const name of ['steel','rust']){
+  const s=warehouseSurfaceSpec(WAREHOUSE_SURFACE_WORLD,{...asset,id:'warehouse:box-'+name},object),m=new T.MeshStandardMaterial({color:'#20282a'}),original=m.color.clone();
+  assert.equal(warehouseSurfaceBatchKey(s,new T.Matrix4()),'');
+  surfaces.apply(s,geometry,m,new T.Matrix4(),await surfaces.ready(s.family),8);assert.deepEqual(m.color,original);assert.equal(m.map,null);
+  const shader={vertexShader:'#include <project_vertex>',fragmentShader:'#include <map_fragment>\n#include <roughnessmap_fragment>'};m.onBeforeCompile(shader);
+  assert.match(shader.fragmentShader,/fwidth\(warehouseWearY\)/);assert.match(shader.fragmentShader,/smoothstep\(16.0,196.0/);assert.match(shader.fragmentShader,/roughnessFactor\+warehouseWear\*\.18/);m.dispose();
+ }
+ surfaces.dispose();geometry.dispose();
 });
