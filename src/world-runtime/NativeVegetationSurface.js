@@ -6,7 +6,7 @@ uniform sampler2D nativeLeafAtlas;
 float vegSat(float x){return clamp(x,0.0,1.0);}
 // GLSL smoothstep has undefined results for reversed edges; the source uses them deliberately.
 float vegSmooth(float a,float b,float x){float t=clamp((x-a)/(b-a),0.0,1.0);return t*t*(3.0-2.0*t);}
-float luminance(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}
+float vegLuminance(vec3 c){return dot(c,vec3(.2126,.7152,.0722));}
 float vegHash12(vec2 p){vec3 p3=fract(vec3(p.x,p.y,p.x)*.1031);p3+=dot(p3,p3.yzx+33.33);return fract((p3.x+p3.y)*p3.z);}
 float vegNoise(vec2 p){vec2 i=floor(p),f=fract(p),u=f*f*(f*-2.0+3.0);return mix(mix(vegHash12(i),vegHash12(i+vec2(1,0)),u.x),mix(vegHash12(i+vec2(0,1)),vegHash12(i+vec2(1,1)),u.x),u.y);}
 struct VegBroad { float w; bool cut; };
@@ -342,7 +342,7 @@ vec3 vegCanopyLeafColor( float seed, float cr, bool isShrub ) {
 	c = mix( c, mix( vec3( 0.107023, 0.084376, 0.034340 ), vec3( 0.155926, 0.102242, 0.042311 ), cr ), dry * 0.5 );
 	float flower = step( 0.988, iv2 ) * treeK * step( 0.5, cr );
 	c = mix( c, vec3( 0.254152, 0.068478, 0.025187 ), flower * 0.5 );
-	return mix( vec3( luminance( c ) ), c, 0.85 );
+	return mix( vec3( vegLuminance( c ) ), c, 0.85 );
 }
 
 vec3 vegBarkColor( float n, float n2 ) {
