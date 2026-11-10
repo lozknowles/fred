@@ -24,7 +24,7 @@ export async function createPublicFredServer({root,manifestPath,origin,worker,ma
   const info=await stat(file);if(!info.isFile())throw Error('Public file not regular');let gzip=null,gzipDigest=null;
   // Encoding variants are built once from verified immutable bytes, before listening.
   // Original files and manifest digests remain authoritative for decoded responses.
-  if(info.size>=1024&&['.bin','.json','.js','.css'].includes(extname(file))){const original=await readFile(file);if(original.length!==info.size||createHash('sha256').update(original).digest('hex')!==digest)throw Error('Public file changed during encoding');const encoded=gzipSync(original,{level:6});if(encoded.length<original.length){gzip=encoded;gzipDigest=createHash('sha256').update(encoded).digest('hex');}}
+  if(info.size>=1024&&['.bin','.json','.js','.css','.glb'].includes(extname(file))){const original=await readFile(file);if(original.length!==info.size||createHash('sha256').update(original).digest('hex')!==digest)throw Error('Public file changed during encoding');const encoded=gzipSync(original,{level:6});if(encoded.length<original.length){gzip=encoded;gzipDigest=createHash('sha256').update(encoded).digest('hex');}}
   files.set('/'+path,{file,size:info.size,digest,notice:notice(path),gzip,gzipDigest});
  }
  if(worker&&(!isAbsolute(worker)||!worker.endsWith('.py')))throw Error('Absolute administrator worker path required');

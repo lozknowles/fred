@@ -17,5 +17,5 @@ test('response and stream byte overflow and redirect are rejected',async()=>{
  for(const response of [new Response('large',{headers:{'content-length':'1000'}}),new Response('large'),new Response('x',{status:302})]){const source=hostedRepositorySource('/world/',{...options,fetch:async()=>response});await assert.rejects(source.read('world.json',2));}
 });
 test('timeout aborts stalled requests',async()=>{
- const source=hostedRepositorySource('/world/',{...options,timeoutMs:1,fetch:async(url,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(Error('aborted'))))});await assert.rejects(source.read('world.json',100),/aborted/);
+ const source=hostedRepositorySource('/world/',{...options,timeoutMs:1,fetch:async(url,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(Error('aborted'))))});await assert.rejects(source.read('world.json',100),/deadline exceeded/);
 });

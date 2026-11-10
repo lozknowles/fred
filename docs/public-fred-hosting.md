@@ -21,7 +21,7 @@ and portrait presets are refused even if listed. Deploy to an immutable release
 directory; hashes are verified at startup, not on every response.
 
 At startup the server also builds gzip variants of verified `.bin`, `.json`,
-`.js`, and `.css` files when encoding reduces their size. No request triggers
+`.js`, `.css`, and `.glb` files when encoding reduces their size. No request triggers
 compression work. Each variant has an ETag based on its encoded bytes,
 `Vary: Accept-Encoding`, and its encoded Content-Length; the browser receives
 exact original bytes after decoding. Range responses retain the original

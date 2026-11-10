@@ -1,4 +1,5 @@
 import { isRepositoryContentPath } from './LocalRepositoryFiles.js';
+import { transferDeadline } from '../util/TransferDeadline.js';
 /** Static repository deployments share the application's origin. The common
  * manifest loader verifies all bytes, schema, capability and content digests. */
 export function hostedRepositorySource(input,options={}){
@@ -13,15 +14,16 @@ export function hostedRepositorySource(input,options={}){
  const source={kind:'local',label:'hosted:'+root.pathname,read:async(path,maxBytes,requestOptions={})=>{
   if(!isRepositoryContentPath(path))throw Error('Repository content path is not allowed.');
   if(!Number.isSafeInteger(maxBytes)||maxBytes<1)throw Error('Repository byte limit is invalid.');
-  const url=new URL(path,root).href,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);let reader;
+  const url=new URL(path,root).href,deadline=transferDeadline(timeoutMs,{progressive:maxBytes>=1024*1024,signal:requestOptions.signal,message:'Hosted repository deadline exceeded'});let reader;
   try{
-   const response=await fetcher(url,{signal:requestOptions.signal?AbortSignal.any([controller.signal,requestOptions.signal]):controller.signal,redirect:'error',credentials:'omit',referrerPolicy:'no-referrer',cache:path==='world.json'?'no-store':'default'});
+   deadline.signal.throwIfAborted();
+   const response=await deadline.wait(()=>fetcher(url,{signal:deadline.signal,redirect:'error',credentials:'omit',referrerPolicy:'no-referrer',cache:path==='world.json'?'no-store':'default'}));
    if(!response.ok||response.redirected||(response.url&&response.url!==url))throw Error('Hosted repository request failed or redirected ('+response.status+').');
    const length=response.headers.get('content-length');// Transfer length may be compressed; enforce the decoded byte budget below.
    if(length!==null&&!/^\d+$/.test(length))throw Error('Hosted repository response length is invalid.');
    if(!response.body)throw Error('Hosted repository response has no readable body.');reader=response.body.getReader();const chunks=[];let total=0;
-   for(;;){const part=await reader.read();if(part.done)break;total+=part.value.byteLength;if(total>maxBytes)throw Error('Hosted repository stream exceeds its byte limit.');chunks.push(part.value);}
+   for(;;){const part=await deadline.wait(()=>reader.read());if(part.done)break;total+=part.value.byteLength;if(total>maxBytes)throw Error('Hosted repository stream exceeds its byte limit.');deadline.progress(part.value.byteLength);chunks.push(part.value);}
    const bytes=new Uint8Array(total);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;
-  }finally{clearTimeout(timer);if(reader){try{await reader.cancel();}catch{}reader.releaseLock();}}
+  }finally{deadline.dispose();if(reader){try{void reader.cancel().catch(()=>{});}catch{}reader.releaseLock();}}
  }};source.textureTierRead=source.read;return source;
 }

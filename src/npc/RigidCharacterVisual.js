@@ -3,25 +3,29 @@ import * as N from '../engine/index.js';
 import {Material} from '../engine/render/Material.js';
 import {parseGLB} from '../engine/loaders/GLTF.js';
 import {T} from '../world-runtime/vendor/world-engine-contract.js';
+import {transferDeadline} from '../util/TransferDeadline.js';
 
 const installedSources=new Map();
 export const microduckUrl=()=>(import.meta.env?.BASE_URL||'/')+'models/microduck/microduck-realtime.glb';
-export function loadPinnedMicroduck(url=microduckUrl(),{fetcher=fetch,timeoutMs=10000}={}){
- if(installedSources.has(url))return installedSources.get(url);
+export function loadPinnedMicroduck(url=microduckUrl(),{fetcher=fetch,timeoutMs=10000,signal}={}){
+ signal?.throwIfAborted();
+ // Independently abortable consumers must not cancel a shared default load or
+ // inherit another consumer's signal. Only the default loads are coalesced.
+ if(!signal&&installedSources.has(url))return installedSources.get(url);
  const pending=(async()=>{
-  const controller=new AbortController(),limit=Math.min(10000,Math.max(1,Number(timeoutMs)||10000));let reader;
-  const timer=setTimeout(()=>controller.abort(Error('Microduck asset deadline exceeded')),limit);
+  const limit=Math.min(10000,Math.max(1,Number(timeoutMs)||10000)),deadline=transferDeadline(limit,{progressive:true,signal,message:'Microduck asset deadline exceeded'});let reader;
   try{
-   const response=await fetcher(url,{cache:'no-cache',signal:controller.signal});if(!response.ok)throw Error('Microduck asset unavailable');
+   deadline.signal.throwIfAborted();
+   const response=await deadline.wait(()=>fetcher(url,{cache:'no-cache',signal:deadline.signal}));if(!response.ok)throw Error('Microduck asset unavailable');
    // Fetch exposes decoded bytes; compressed transfer Content-Length is not the model size.
    if(!response.body?.getReader)throw Error('Microduck asset stream unavailable');reader=response.body.getReader();const chunks=[];let size=0;
-   while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>MICRODUCK_BYTES)throw Error('Microduck asset exceeds byte limit');chunks.push(value);}
+   while(true){const {done,value}=await deadline.wait(()=>reader.read());if(done)break;size+=value.byteLength;if(size>MICRODUCK_BYTES)throw Error('Microduck asset exceeds byte limit');deadline.progress(value.byteLength);chunks.push(value);}
    if(size!==MICRODUCK_BYTES)throw Error('Microduck asset byte count mismatch');
    const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
-   const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');if('sha256:'+sha!==MICRODUCK_ASSET_VERSION)throw Error('Microduck asset integrity mismatch');return parseGLB(bytes.buffer);
-  }finally{clearTimeout(timer);controller.abort();void reader?.cancel().catch(()=>{});}
+   const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');deadline.signal.throwIfAborted();if('sha256:'+sha!==MICRODUCK_ASSET_VERSION)throw Error('Microduck asset integrity mismatch');return parseGLB(bytes.buffer);
+  }finally{deadline.dispose();try{void reader?.cancel().catch(()=>{});}catch{}reader?.releaseLock?.();}
  })();
- installedSources.set(url,pending);pending.catch(()=>{if(installedSources.get(url)===pending)installedSources.delete(url);});return pending;
+ if(!signal){installedSources.set(url,pending);pending.catch(()=>{if(installedSources.get(url)===pending)installedSources.delete(url);});}return pending;
 }
 const REQUIRED=['Idle','Walk','Turn','Stop','Look','EnterPortal','ExitPortal'];
 /** Installed articulated robot, not an expansion of untrusted world GLB admission. */
