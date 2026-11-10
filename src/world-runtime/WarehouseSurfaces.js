@@ -1,4 +1,5 @@
 import {T} from './vendor/world-engine-contract.js';
+import {warehouseMaps} from './WarehouseGraphicsAssets.js';
 
 export const WAREHOUSE_SURFACE_WORLD='elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319';
 export const WAREHOUSE_RECIPE_SOURCE='ElseMesh PortalInteriorRecipe.js @ f91cabbd4bac784076095b73ac45ec1ffc5da9f0; recipe SHA256 efb73bea8e5e81cb7cccc6b8a5449c51b31137a73044d132b91dfaf499f1666c';
@@ -7,12 +8,6 @@ const specs={
  polishedTile:{family:'floor',metres:3.15},concrete:{family:'floor',metres:3.15},concreteDark:{family:'floor',metres:3.15},
  wood:{family:'wood',metres:2},charredWood:{family:'wood',metres:2},
  fabric:{family:'fabric',metres:1.15},charcoal:{family:'fabric',metres:1.15},rug:{family:'fabric',metres:1.15},rugLight:{family:'fabric',metres:1.15},rugStair:{family:'fabric',metres:1.15},
-};
-const files={
- brick:['textures/portal-warehouse/brick_wall_001_diffuse_1k.jpg','textures/portal-warehouse/brick_wall_001_nor_gl_1k.jpg','textures/portal-warehouse/brick_wall_001_arm_1k.jpg'],
- floor:['textures/portal-warehouse/concrete_floor_diff_1k.jpg','textures/portal-warehouse/concrete_floor_nor_gl_1k.jpg','textures/portal-warehouse/concrete_floor_arm_1k.jpg'],
- wood:['models/props/s_weathered_brown_planks_a.jpg','models/props/s_weathered_brown_planks_n.jpg','models/props/s_weathered_brown_planks_r.jpg'],
- fabric:['textures/portal-warehouse/fabric_soft_black_diffuse_512.jpg','textures/portal-warehouse/fabric_soft_black_nor_gl_512.jpg','textures/portal-warehouse/fabric_soft_black_roughness_512.jpg'],
 };
 /** Only the original recipe exports are admitted; library and replacement GLBs retain their materials. */
 export function warehouseSurfaceSpec(worldId,asset,object,terminal){
@@ -66,7 +61,7 @@ export function createWarehouseSurfaces({baseUrl=import.meta.env?.BASE_URL??'/',
  };
  const ready=family=>{
   if(!families.has(family))families.set(family,(async()=>{
-   const results=await Promise.allSettled(files[family].map((path,i)=>load(path,i===0)));
+   const results=await Promise.allSettled(warehouseMaps[family].map((path,i)=>load(path,i===0)));
    const failed=results.find(r=>r.status==='rejected');if(failed){for(const r of results)if(r.status==='fulfilled'){textures.delete(r.value);r.value.dispose();}throw failed.reason;}
    return results.map(r=>r.value);
   })());return families.get(family);

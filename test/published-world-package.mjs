@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {warehouseGraphicsFiles} from '../src/world-runtime/WarehouseGraphicsAssets.js';
 import {DOCK_WORLD_ID,DOCK_CONTENT_DIGEST,DOCK_NOTICE_PINS,readDockPublication} from '../tools/dock-publication.mjs';
 import {SHIFT_WORLD_ID,SHIFT_CONTENT_DIGEST} from '../src/world-runtime/ShiftingWorldProfile.js';
 import {readNeonShiftPublication} from '../tools/neon-shift-publication.mjs';
@@ -14,6 +15,12 @@ import {assertTextureTierCompatible,textureTierReferences} from '../src/world-ru
 const arg=process.env.PUBLIC_ROOM_PACKAGE??process.env.PUBLIC_SUNSET_PACKAGE;
 if(!arg)throw Error('PUBLIC_ROOM_PACKAGE (or legacy PUBLIC_SUNSET_PACKAGE) must identify the generated publication candidate');
 const root=await fs.realpath(arg),sha=b=>createHash('sha256').update(b).digest('hex');
+test('the packaged opening world contains the authored vegetation atlas, PBR images and credits', async () => {
+ for (const file of warehouseGraphicsFiles) {
+  const source = await fs.readFile(new URL('../public/' + file, import.meta.url));
+  assert.equal(sha(await fs.readFile(path.join(root, file))), sha(source), file);
+ }
+});
 const catalog=validatePublishedWorldCatalog(JSON.parse(await fs.readFile(path.join(root,'published-worlds.json'),'utf8')),{baseURL:'https://publication.invalid/ElseMesh/index.html'});
 test('generated publication contains every manifest, native and lazy SOG/physics byte with the pinned hash',async()=>{
  let verified=0,bytes=0;const projects=[];

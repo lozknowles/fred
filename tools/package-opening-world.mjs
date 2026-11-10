@@ -1,4 +1,5 @@
 import {collectVerifiedRepositoryTextureTiers} from '../src/world-runtime/RepositoryTextureTiers.js';
+import {warehouseGraphicsFiles} from '../src/world-runtime/WarehouseGraphicsAssets.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -49,7 +50,7 @@ for(const relative of selected){
  if(!info.isFile()||info.isSymbolicLink())throw Error('World repository contains a non-file or link.');
  total+=info.size;if(total>120*1024*1024)throw Error('World repository exceeds the package byte limit.');
 }
-const buildFiles=['index.html','worlds.html','assets','clouds','textures/smaa','images/loz-warehouse-island.svg'];
+const buildFiles=['index.html','worlds.html','assets','clouds','textures/smaa','images/loz-warehouse-island.svg',...warehouseGraphicsFiles];
 const characterFiles=['stock-player.glb','stock-female.glb','stock-player-medium.glb','stock-player-low.glb','stock-female-medium.glb','stock-female-low.glb','avatar-male.png','avatar-female.png','LICENSE-Rocketbox.md'];
 for(const name of buildFiles)await fs.access(path.join(build,name));
 for(const name of characterFiles)await fs.access(path.join(build,'models/characters',name));
