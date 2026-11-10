@@ -68,7 +68,7 @@ test('native instances restore immediately on toggle/portal/occluder removal, in
  // camera is admitted through repositorySceneOptions, just as main.js does.
  const sceneOptions=repositorySceneOptions({nativeIsland:{}},{nativeIslandRead:async()=>{}},{backend:'webgl2',camera});
  assert.equal(sceneOptions.nativeIsland.mainCamera,camera);
- const native=await buildWebGLNativeIsland({project:{environment:{}},root,camera:camera.clone(),options:{...sceneOptions.nativeIsland,readNativeIsland:async()=>source,prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}})}});
+ const native=await buildWebGLNativeIsland({project:{environment:{}},root,camera:camera.clone(),options:{...sceneOptions.nativeIsland,readNativeIsland:async()=>source,prepareLeafAtlas:async()=>new T.Texture(),prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}})}});
  try{
   native.bindView(camera);assert.equal(native.stats().plants.displayed,1);assert.equal(native.stats().plants.occlusion.retainedBytes,0,'unrelated worlds retain no pose cache');
   native.setPlantOccluders([wall]);native.bindView(camera);assert.equal(native.stats().plants.displayed,0);assert.equal(native.stats().plants.occlusion.rejected,1);
@@ -91,7 +91,7 @@ test('reused portal camera rebuilds actual foliage instances for expanded and as
  const records=Object.fromEntries(['palms','trees','bananas','shrubs','youngPalms','ferns','monsteras','elephantEars','heliconias','strelitzias'].map(name=>[name,[]]));records.trees=[{x:0,y:0,z:-80,s:1,sy:1,yaw:0,seed:.1,H:12.5}];
  const source={domain:{res:n,size:8,origin:-4},coarse:{res:n,heights:new Float32Array(n*n),normal,splat},grassMask:{res:n,data:normal},shore:{res:n,data:new Float32Array(n*n*4)},records,appearance:{swellDir:{x:0,y:-1}},ocean:{level:0,fft:{local:{windDirection:25}},shore:{period:9,amplitude:.34}},tiles:[],readTile:async()=>({})};
  const texture=new T.Texture(),bark={map:texture,normalMap:texture,orm:texture};
- const native=await buildWebGLNativeIsland({project:{environment:{}},root,camera:camera.clone(),options:{mainCamera:camera,readNativeIsland:async()=>source,prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}})}});
+ const native=await buildWebGLNativeIsland({project:{environment:{}},root,camera:camera.clone(),options:{mainCamera:camera,readNativeIsland:async()=>source,prepareLeafAtlas:async()=>new T.Texture(),prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}})}});
  try{
   const portal=camera.clone();let foliage;root.traverse(n=>{if(n.userData.nativePlantSpecies==='trees'&&n.userData.nativePlantDistant)foliage=n;});
   portal.setViewOffset(1000,1000,750,0,250,1000);native.bindView(portal);assert.equal(foliage.count,0,'rightmost quarter excludes the known source tree');

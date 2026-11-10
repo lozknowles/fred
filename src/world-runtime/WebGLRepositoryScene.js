@@ -14,6 +14,7 @@ import { repositoryWaterQuery } from './RepositoryWater.js';
 import { assetPrimitiveGroups } from './NativeAssets.js';
 import { makeRetroScreenMaterial } from '../world/PortalRetroScreens.js';
 import { buildRecipe } from '../world/PortalInteriorRecipe.js';
+import {createWarehouseSurfaces,warehouseSurfaceSpec,warehouseSurfaceBatchKey} from './WarehouseSurfaces.js';
 
 const standard=(color,extra={})=>new T.MeshStandardMaterial({color,roughness:.85,side:T.DoubleSide,...extra});
 // Opt in only the verified authored Warehouse brick batches. Their original
@@ -59,7 +60,8 @@ export function disposeWebGLRepositoryScene(candidate){
  candidate.nativeIsland?.dispose();
  candidate.root?.removeFromParent();const geometries=new Set(),materials=new Set(),textures=new Set();
  candidate.root?.traverse(n=>{n.userData.disposePresentationLOD?.();if(n.geometry)geometries.add(n.geometry);for(const m of Array.isArray(n.material)?n.material:[n.material])if(m){materials.add(m);for(const value of Object.values(m))if(value?.isTexture)textures.add(value);}});
- for(const g of geometries)g.dispose();for(const m of materials)m.dispose();for(const t of textures)t.dispose();
+ for(const g of geometries)g.dispose();for(const m of materials)m.dispose();for(const t of textures)if(!t.userData.warehouseSurfaceOwned)t.dispose();
+ candidate.warehouseSurfaces?.dispose();
  for(const loaded of candidate.loadedAssets??[])disposeAssetScene(loaded.scene);
  candidate.loadedAssets?.clear();
 }
@@ -139,11 +141,13 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
   }
   const ambient=createRepositoryAmbientBehaviour(project,{terrain:candidate.terrain});candidate.ambient=ambient;
   const groups=new Map(),cache=new Map(),sourceBytes=new Map(),screensByObject=new Map((project.terminals??[]).filter(t=>t.screenObjectId).map(t=>[t.screenObjectId,t.kind]));
-  for(const object of allObjects.filter(o=>o.kind==='glb'&&effectiveObjectState(allObjects,o.id).visible)){const kind=screensByObject.get(object.id),key=object.assetId+JSON.stringify(object.materialOverrides??[])+(kind??'')+(kind==='sun'?object.id:'')+(object.landscapeChunk??'');if(!groups.has(key))groups.set(key,{objects:[],kind});groups.get(key).objects.push(object);}
-  for(const {objects,kind}of groups.values()){
+  candidate.warehouseSurfaces=createWarehouseSurfaces();
+  for(const object of allObjects.filter(o=>o.kind==='glb'&&effectiveObjectState(allObjects,o.id).visible)){const kind=screensByObject.get(object.id),surface=warehouseSurfaceSpec(descriptor.worldId,project.assets.find(a=>a.id===object.assetId),object,kind),key=object.assetId+JSON.stringify(object.materialOverrides??[])+(kind??'')+(kind==='sun'?object.id:'')+(object.landscapeChunk??'')+'|surface:'+(surface?surface.material+':'+warehouseSurfaceBatchKey(surface,matrices.get(object.id)):'none');if(!groups.has(key))groups.set(key,{objects:[],kind,surface});groups.get(key).objects.push(object);}
+  for(const {objects,kind,surface}of groups.values()){
    const first=objects[0],asset=project.assets.find(a=>a.id===first.assetId);if(!asset)throw Error('Missing asset '+first.assetId);
    let loaded=cache.get(asset.id);if(!loaded){const response=await fetch(asset.dataUrl);if(!response.ok)throw Error('Asset read failed');const bytes=new Uint8Array(await response.arrayBuffer());loaded=await inspectAndLoadAsset(bytes.buffer);if(options.loaded?.source?.textureTierRead&&textureTierReferences(asset).length)sourceBytes.set(asset.id,bytes);cache.set(asset.id,loaded);candidate.loadedAssets.add(loaded);}
    if(!kind)candidate.textureTiers.register(asset,sourceBytes.get(asset.id),loaded,objects.map(o=>matrices.get(o.id).elements.slice(12,15)));
+   const surfaceMaps=surface?await candidate.warehouseSurfaces.ready(surface.family):null;
    loaded.scene.updateMatrixWorld(true);const materialCache=new Map(),retro=kind?buildWebGLRetroMaterial(kind):null;let primitives=0;
    loaded.scene.traverse(child=>{
     if(!child.isMesh||!child.visible)return;
@@ -151,6 +155,7 @@ export async function buildWebGLRepositoryScene(descriptor,camera,options={}){
     for(const part of assetPrimitiveGroups(child)){
      const slot=loaded.materialIndices.get(part.material)??-1;let material=retro??materialCache.get(part.material);
      if(!material){material=part.material.clone();const override=first.materialOverrides?.find(o=>o.materialIndex===slot);if(override?.color!==undefined)material.color.set(override.color);if(override?.roughness!==undefined)material.roughness=override.roughness;if(override?.metalness!==undefined)material.metalness=override.metalness;materialCache.set(part.material,material);}
+     if(surface)candidate.warehouseSurfaces.apply(surface,part.geometry,material,matrices.get(first.id),surfaceMaps,objects.length);
      const mesh=new T.InstancedMesh(part.geometry,material,objects.length);mesh.userData.editorObjectIds=objects.map(o=>o.id);
      if(kind==='sun')mesh.userData.updateSunScreen=canvas=>{if(material.map.image!==canvas){const previous=material.map;material.map=new T.CanvasTexture(canvas);material.map.colorSpace=T.SRGBColorSpace;material.needsUpdate=true;previous.dispose();}else material.map.needsUpdate=true;};
      for(let i=0;i<objects.length;i++){mesh.setMatrixAt(i,matrices.get(objects[i].id));if(objects[i].landscapeTint)mesh.setColorAt(i,new T.Color().fromArray(objects[i].landscapeTint));}mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;ambient.register(mesh,objects,matrices);root.add(mesh);primitives++;

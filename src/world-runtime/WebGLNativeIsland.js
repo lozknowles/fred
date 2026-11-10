@@ -6,6 +6,8 @@ import {NativeIslandTiles} from './NativeIslandTiles.js';
 import {getDetailTexture} from '../world/terrain/DetailTextures.js';
 import * as Plants from '../world/vegetation/PlantGeometry.js';
 import {createNativePlantOcclusion,nativeCanopyOcclusionSphere} from './NativePlantOcclusion.js';
+import {loadNativeLeafAtlas,NATIVE_VEGETATION_SURFACE_GLSL,NATIVE_CANOPY_COLOR_GLSL} from './NativeVegetation.js';
+import {createNativeUnderstoryIndex} from './NativeUnderstoryIndex.js';
 
 export const WEBGL_NATIVE_ISLAND_QUALIFICATION=Object.freeze({backend:'webgl2',backendQualification:'unqualified-optical-equivalence',waterModel:'source-parameter analytic swell with broken-up shore foam and detail normals',limitations:['Original FFT, refraction, swash simulation and underwater optics are not reproduced.','Near plants use original source geometry and exact records; distant crowns use reduced source card geometry, not the original octahedral atlases.','Leaf alpha, wind and terrain microshading are GLSL approximations; grass density is applied to the ground without individual grass blades.']});
 const fract=x=>x-Math.floor(x),UP=new T.Vector3(0,1,0);
@@ -45,22 +47,21 @@ vec3 nativePlantPosition(vec3 P){
  float s=aVeg.y,ph=aVeg.w;float bend=s*s*4.5*(w*w*.16*(g*.8+.35)+sin(nativeTime*(ph*.5+1.3)+ph*23.0+phase)*w*.075*(g+.3));
  vec3 disp=vec3(wd.x,0,wd.y)*bend+vec3(0,sin(nativeTime*(ph+2.1)+ph*41.0)*s*s*w*.1-bend*.3,0);vec3 moved=normalize(crown+disp+vec3(0,.00001,0))*length(crown);return aMat.x<.5?stem:centre+moved;
 }`;
-function plantMaterial(kind,time,wind,gust,detail,bark){
+function plantMaterial(kind,time,wind,gust,detail,bark,leafAtlas){
  const material=new T.MeshStandardMaterial({color:'#ffffff',side:T.DoubleSide,roughness:.86});material.alphaTest=.35;material.userData.nativeWindStrength=1;material.userData.nativeWindVector=wind.value;
- material.onBeforeCompile=shader=>{Object.assign(shader.uniforms,{nativeTime:time,nativeWind:wind,nativeGust:gust,nativeWindStrength:{value:1},nativeDetail:{value:detail},nativeBark:{value:bark.map},nativeBarkNormal:{value:bark.normalMap},nativeOrm:{value:bark.orm}});
- shader.vertexShader=PLANT_VERTEX+'\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>
- vNativePart=aMat;vNativeUv=uv;transformed=nativePlantPosition(transformed);`);
- shader.fragmentShader=`varying vec4 vNativePart;varying vec2 vNativeUv;uniform sampler2D nativeBark;uniform sampler2D nativeBarkNormal;uniform sampler2D nativeOrm;
+ material.onBeforeCompile=shader=>{Object.assign(shader.uniforms,{nativeTime:time,nativeWind:wind,nativeGust:gust,nativeWindStrength:{value:1},nativeDetail:{value:detail},nativeBark:{value:bark.map},nativeBarkNormal:{value:bark.normalMap},nativeOrm:{value:bark.orm},nativeLeafAtlas:{value:leafAtlas}});
+ shader.vertexShader=PLANT_VERTEX+'\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying float vNativeSeed;varying float vNativeHeight;').replace('#include <begin_vertex>',`#include <begin_vertex>
+ vNativePart=aMat;vNativeUv=uv;transformed=nativePlantPosition(transformed);vNativeSeed=iPlant.w;vNativeHeight=transformed.y*iRecord.y;`);
+ shader.fragmentShader=NATIVE_VEGETATION_SURFACE_GLSL+`uniform sampler2D nativeBark;uniform sampler2D nativeBarkNormal;uniform sampler2D nativeOrm;
 `+shader.fragmentShader;
  shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
  bool bark=vNativePart.x<.5${kind==='tree'?' || vNativePart.x>4.5':''};
  if(bark){diffuseColor.rgb*=texture2D(nativeBark,vNativeUv).rgb*texture2D(nativeOrm,vNativeUv).r;}else{
- ${kind==='tree'?`vec2 p=fract(vNativeUv)*2.0-1.0;float leaf=1.0-dot(p*vec2(1.0,1.2),p*vec2(1.0,1.2));if(leaf<.08)discard;`:'float edge=abs(vNativeUv.x*2.0-1.0);if(vNativeUv.x>=0.0 && edge>pow(max(sin(clamp(vNativeUv.y,0.0,1.0)*3.14159),.04),.35))discard;'}
- diffuseColor.rgb*=mix(vec3(.07,.15,.035),vec3(.24,.34,.095),vNativePart.z);if(vNativePart.x>8.5&&vNativePart.x<9.5)diffuseColor.rgb=vec3(.65,.09,.035);
+ ${kind==='tree'?NATIVE_CANOPY_COLOR_GLSL:'if(!vegPlantMask())discard;diffuseColor.rgb*=vegPlantAlbedo();'}
  }`);
  shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>\n if(vNativePart.x<.5${kind==='tree'?' || vNativePart.x>4.5':''})roughnessFactor=clamp(texture2D(nativeOrm,vNativeUv).g,.6,1.0);`);
  shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>\n if(vNativePart.x<.5${kind==='tree'?' || vNativePart.x>4.5':''}){vec3 barkN=texture2D(nativeBarkNormal,vNativeUv).xyz*2.0-1.0;vec3 p1=dFdx(-vViewPosition),p2=dFdy(-vViewPosition);vec2 t1=dFdx(vNativeUv),t2=dFdy(vNativeUv);vec3 tangent=normalize(p1*t2.y-p2*t1.y),bitangent=normalize(-p1*t2.x+p2*t1.x);normal=normalize(tangent*barkN.x*.65+bitangent*barkN.y*.65+normal*barkN.z);}`);
- };material.customProgramCacheKey=()=> 'native-source-plants-webgl/1:'+kind;return material;
+ };material.customProgramCacheKey=()=> 'native-source-plants-webgl/2:'+kind;return material;
 }
 function buildPlants(source,time,detail,materials,mainCamera){
  const occlusion=createNativePlantOcclusion(mainCamera),occlusionSphere=new T.Sphere();
@@ -70,12 +71,12 @@ function buildPlants(source,time,detail,materials,mainCamera){
   const variants=canopy?(species==='trees'?3:2):species==='bananas'?2:1;
   for(let variant=0;variant<variants;variant++){
    const records=source.records[species].filter(r=>canopy?Math.floor(fract(r.seed*7.77)*variants)===variant:species==='bananas'?(r.seed<.5?0:1)===variant:true);if(!records.length)continue;
-   const occlusionCache={poses:null,bounds:null};
+   const occlusionCache={poses:null,bounds:null},understoryIndex=!canopy&&far<=140?createNativeUnderstoryIndex(records,far):null;
    const original=species==='bananas'?factory(variant?23:9):factory();const native=canopy?Plants.lobeVariantGeometry(original.geometry,Plants.LOBE_TABLE,(variant+(species==='shrubs'?Plants.TREE_VARIANTS:0))*8):original.geometry;
    for(const distant of near?[false,true]:[false]){
     const farPalm=species==='palms'&&distant?Plants.buildPalmFar().geometry:null;const geometry=convertNativePlantGeometry(farPalm??native,{leafStride:distant?(canopy?8:1):1}),count=records.length;if(farPalm)farPalm.dispose();geometry.setAttribute('iPlant',new T.InstancedBufferAttribute(new Float32Array(count*4),4));geometry.setAttribute('iRecord',new T.InstancedBufferAttribute(new Float32Array(count*4),4));
 
-    const mesh=new T.InstancedMesh(geometry,materials[canopy?'tree':'palm'],count);mesh.count=0;mesh.frustumCulled=false;mesh.userData.mediaOcclusionPlant=canopy?'native-canopy-v1':'native-palm-v1';mesh.userData.nativePlantSpecies=species;mesh.userData.nativePlantDistant=distant;root.add(mesh);batches.push({mesh,records,occlusionCache,species,canopy,distant,near,far});
+    const mesh=new T.InstancedMesh(geometry,materials[canopy?'tree':'palm'],count);mesh.count=0;mesh.frustumCulled=false;mesh.userData.mediaOcclusionPlant=canopy?'native-canopy-v1':'native-palm-v1';mesh.userData.nativePlantSpecies=species;mesh.userData.nativePlantDistant=distant;root.add(mesh);batches.push({mesh,records,occlusionCache,understoryIndex,species,canopy,distant,near,far});
    }
    if(native!==original.geometry)native.dispose();original.geometry.dispose();
   }
@@ -103,8 +104,9 @@ function buildPlants(source,time,detail,materials,mainCamera){
     const n=batch.records.length;occlusionCache.poses=new Float32Array(n*16);occlusionCache.bounds=new Float64Array(n*4);
     for(let i=0;i<n;i++){nativePlantPoseMatrix(batch.records[i],matrix,true);matrix.toArray(occlusionCache.poses,i*16);nativeCanopyOcclusionSphere(mesh.geometry,batch.records[i],matrix,occlusionSphere);occlusionCache.bounds.set([occlusionSphere.center.x,occlusionSphere.center.y,occlusionSphere.center.z,occlusionSphere.radius],i*4);}
    }
-   const poses=occlusionCache.poses,canopyBounds=occlusionCache.bounds;
-   for(let i=0;i<batch.records.length;i++){
+   const poses=occlusionCache.poses,canopyBounds=occlusionCache.bounds,candidates=batch.understoryIndex?.query(camera.position.x,camera.position.z);
+   for(let candidate=0,n=candidates?.length??batch.records.length;candidate<n;candidate++){
+    const i=candidates?candidates[candidate]:candidate;
     const r=batch.records[i],distance=Math.hypot(r.x-camera.position.x,r.z-camera.position.z);
     if(distance>batch.far||batch.near&&(batch.distant?distance<batch.near:distance>=batch.near))continue;
     sphere.center.set(r.x,r.y+(r.H??5)*.5,r.z);sphere.radius=Math.max(4,r.H??0)*r.s+4;if(!frustum.intersectsSphere(sphere))continue;
@@ -122,32 +124,85 @@ function buildPlants(source,time,detail,materials,mainCamera){
 
  },stats:()=>({records:Object.values(source.records).filter(Array.isArray).reduce((n,a)=>n+a.length,0),displayed,batches:batches.length,occlusion:{...occlusion.stats(),retainedBytes:[...new Set(batches.map(b=>b.occlusionCache))].reduce((n,c)=>n+(c.poses?.byteLength??0)+(c.bounds?.byteLength??0),0)},farPolicy:'every eighth distant leaf card; unqualified atlas equivalence'}),dispose(){for(const batch of batches)batch.mesh.geometry.dispose();root.removeFromParent();}};
 }
-function terrainMaterial({normal,splat,rect,domain,detail,shore,grass,ready,coarse,time}){
+export function terrainMaterial({normal,splat,rect,domain,detail,shore,grass,ready,coarse,time,windDirection=0}){
  const material=new T.MeshStandardMaterial({color:'#ffffff',roughness:.9,side:T.DoubleSide});
  material.onBeforeCompile=shader=>{Object.assign(shader.uniforms,{nativeNormal:{value:normal},nativeSplat:{value:splat},nativeRect:{value:new T.Vector4(...rect)},nativeDomain:{value:new T.Vector2(domain.origin,domain.size)},nativeDetail:{value:detail},nativeShore:{value:shore},nativeGrass:{value:grass},nativeReady:{value:ready},nativeTime:time});
+ shader.uniforms.nativeTerrainWind={value:new T.Vector2(Math.sin(windDirection),Math.cos(windDirection))};
  shader.vertexShader=`varying vec3 vNativeWorld;
 `+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>',`#include <begin_vertex>
  vNativeWorld=(modelMatrix*vec4(transformed,1.0)).xyz;`);
- shader.fragmentShader=`varying vec3 vNativeWorld;uniform sampler2D nativeNormal,nativeSplat,nativeDetail,nativeShore,nativeGrass,nativeReady;uniform vec4 nativeRect;uniform vec2 nativeDomain;uniform float nativeTime;
+ shader.fragmentShader=`varying vec3 vNativeWorld;uniform sampler2D nativeNormal,nativeSplat,nativeDetail,nativeShore,nativeGrass,nativeReady;uniform vec4 nativeRect;uniform vec2 nativeDomain,nativeTerrainWind;uniform float nativeTime;
+ // TerrainShading.js surface-gradient bump; bounded at grazing/degenerate facets.
+ vec3 nativeTerrainBump(vec3 P,vec3 N,float hd){
+  vec3 dx=dFdx(P),dy=dFdy(P),r1=cross(dy,N),r2=cross(N,dx);
+  float det=dot(dx,r1),ad=abs(det),area=length(cross(dx,dy));
+  vec3 grad=(r1*dFdx(hd)+r2*dFdy(hd))*sign(det);
+  float frame=area/max(length(dx)*length(dy),1e-20),facet=ad/max(area,1e-20);
+  grad*=min(1.0,ad*1.4/max(length(grad),1e-20))*smoothstep(.12,.35,frame)*smoothstep(.3,.6,facet);
+  // Divide before normalization to avoid a near-zero vector on collapsed facets.
+  return normalize(N-grad/max(ad,1e-20));
+ }
 `+shader.fragmentShader;
  shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
  vec2 domainUv=(vNativeWorld.xz-nativeDomain.x)/nativeDomain.y;
  ${coarse?'if(texture2D(nativeReady,domainUv).r>.5)discard;':''}
  vec2 mapUv=(vNativeWorld.xz-nativeRect.xy)/nativeRect.zw;vec4 masks=texture2D(nativeSplat,mapUv),nr=texture2D(nativeNormal,mapUv);float h=vNativeWorld.y;
- vec4 a=texture2D(nativeDetail,vNativeWorld.xz/1.9),b=texture2D(nativeDetail,vNativeWorld.xz/6.7+.21),macro=texture2D(nativeDetail,vNativeWorld.xz/34.0+.13);
- float slope=1.0-sqrt(max(0.0,1.0-dot(nr.rg*2.0-1.0,nr.rg*2.0-1.0)));
- float rock=smoothstep(.2,.65,nr.b+(a.r-.5)*.3+slope*.38);float sand=smoothstep(.25,.75,masks.r+(b.b-.5)*.3);float path=smoothstep(.2,.7,masks.g);
+ vec4 a=texture2D(nativeDetail,vNativeWorld.xz/1.9),b=texture2D(nativeDetail,mat2(.2675,.9636,-.9636,.2675)*vNativeWorld.xz/6.7+.21),macro=texture2D(nativeDetail,vNativeWorld.xz/34.0+.13);
+ vec4 fine=texture2D(nativeDetail,mat2(-.7374,.6755,-.6755,-.7374)*vNativeWorld.xz/.63+.53);
+ // Captured normal RG = normal XZ, B = rockiness, A = baked AO.
+ vec2 nxz=nr.rg*2.0-1.0;vec3 terrainN=normalize(vec3(nxz.x,sqrt(max(1.0-dot(nxz,nxz),.0025)),nxz.y));
+ float slope=1.0-terrainN.y;
+ float rock=smoothstep(.2,.65,nr.b+(a.r-.5)*.3+slope*.38);float sand=smoothstep(.3,.72,masks.r+(b.b-.5)*.5+(macro.a-.5)*.35)*(1.0-rock);float path=smoothstep(.2,.7,masks.g)*(1.0-rock);
  vec3 soil=mix(vec3(.10,.15,.035),vec3(.21,.26,.07),b.g);soil=mix(soil,vec3(.19,.12,.065),path);
- float grain=(a.b-.5)*.30+(b.b-.5)*.16+(macro.a-.5)*.22;
- float ripple=sin(vNativeWorld.x*.85+sin(vNativeWorld.z*.18)*.7)*.035*(1.0-smoothstep(0.45,1.1,fwidth(vNativeWorld.x*.85)));
- vec3 ground=mix(soil,vec3(.71,.63,.45)*(1.0+grain+ripple),sand);
- ground=mix(ground,vec3(.19,.20,.16)*(a.r*.35+.7)*(macro.a*.3+.85),rock);
+ float grain=(min(a.b,.62)-.45)*.30+(min(fine.b,.62)-.45)*.20+(macro.a-.5)*.16;
+ // Source Terrain.js: fixed 10.5 cm wind-ripple wavelength, smoothly warped;
+ // filter by phase footprint instead of varying wavelength in world space.
+ float phase=dot(vNativeWorld.xz,nativeTerrainWind)*(6.2832/.105)+b.a*24.0+a.a*7.0+macro.a*30.0;
+ float rip=pow(sin(phase)*.5+.5,1.6);
+ float trod=smoothstep(.52,.7,a.g+(b.g-.5)*.6)*smoothstep(.8,3.0,h);
+ float windK=(1.0-smoothstep(.6,2.2,fwidth(phase)))*smoothstep(1.5,2.2,h)*(1.0-path)*(1.0-trod*.7)*smoothstep(.2,.5,macro.a+b.a*.3);
+ float ripple=(rip-.5)*.12*windK;
+ // Pale coral sand source palette, converted from source sRGB to linear.
+ vec3 beach=mix(vec3(.656,.523,.319),vec3(.787,.674,.477),smoothstep(.3,.72,macro.a+smoothstep(.8,3.0,h)*.2));
+ vec3 ground=mix(soil,beach*(1.0+grain+ripple)*(1.0-trod*.07)*(1.0-path*.07),sand);
+ // Source TerrainShading.js: plates on cliff faces, height-warped strata and
+ // dry upper-face lichen. One triplanar level reuses the existing detail map.
+ vec3 w=pow(abs(terrainN),vec3(4.0));w/=max(dot(w,vec3(1.0)),1e-5);
+ vec4 plates=texture2D(nativeDetail,vNativeWorld.zy/6.1)*w.x+texture2D(nativeDetail,vNativeWorld.xz/6.1+.37)*w.y+texture2D(nativeDetail,vNativeWorld.xy/6.1+.71)*w.z;
+ float steep=1.0-smoothstep(.55,.85,terrainN.y),bandY=h+plates.a*2.5+macro.a*6.0;
+ float strata=texture2D(nativeDetail,vec2(bandY/14.0,.13)).a;
+ float strataAA=1.0-smoothstep(.15,.6,fwidth(bandY));
+ float tone=plates.r*.65+a.r*.35+(macro.a-.5)*.7+(strata-.5)*.8*steep*strataAA;
+ vec3 stone=mix(vec3(.0196,.0185,.0164),vec3(.0732,.0660,.0571),smoothstep(.1,.5,tone));
+ stone=mix(stone,vec3(.1960,.1746,.1473),smoothstep(.5,.85,tone));
+ stone*=smoothstep(.05,.25,plates.r)*.15+.85;
+ float dryRock=smoothstep(2.6,4.0,h);
+ float lichen=smoothstep(.6,.78,plates.g)*smoothstep(.2,.7,terrainN.y)*dryRock*smoothstep(.45,.65,macro.a);
+ stone=mix(stone,vec3(.4480,.4480,.3672),lichen*.45);
+ stone=mix(stone,vec3(.5705,.2140,.0331),smoothstep(.8,.88,plates.g)*dryRock*smoothstep(.5,.8,terrainN.y)*.3);
+ float rockWet=1.0-smoothstep(.25,1.0,h+plates.a*.3);stone*=mix(1.0,.55,rockWet);
+ ground=mix(ground,stone,rock);
  ground=mix(ground,vec3(.29,.34,.21),1.0-smoothstep(-8.0,-.2,h));
- vec4 grassCover=texture2D(nativeGrass,domainUv);ground=mix(ground,ground*vec3(.72,.96,.57)*(macro.g*.24+.88),clamp(grassCover.r,0.0,1.0)*.36);
- float wet=sand*(1.0-smoothstep(-.15,.8,h));diffuseColor.rgb*=ground*mix(1.0,.53,wet)*mix(.55,1.0,nr.a);
+ vec4 grassCover=texture2D(nativeGrass,domainUv);ground=mix(ground,ground*vec3(.72,.96,.57)*(macro.g*.24+.88),clamp(grassCover.r,0.0,1.0)*.36*(1.0-sand)*(1.0-rock));
+ // Original static fallback damp band; this is not live swash/history wetness.
+ float land=smoothstep(-.6,.12,h),wet=(1.0-smoothstep(.05,.65,h))*land;
+ float dampMottle=smoothstep(.3,.7,b.a+(a.g-.45)*.6+(macro.a-.5)*.4);
+ float damp=(1.0-smoothstep(.5,1.7,h+b.a*.3))*mix(.22,.5,dampMottle);
+ float wetK=max(wet,damp)*sand*land;
+ diffuseColor.rgb*=ground*mix(1.0,.53,wetK)*mix(.55,1.0,nr.a);
+ float terrainRough=mix(mix(.88,.93,sand),mix(mix(.88,.8,steep),.45,rockWet),rock);
+ terrainRough=mix(terrainRough,mix(.42,.16,wet),wetK);
+ terrainRough=mix(terrainRough,.75,1.0-land);
+ float px=max(length(dFdx(vNativeWorld)),length(dFdy(vNativeWorld)));
+ float fineK=1.0-smoothstep(.006,.02,px),midK=1.0-smoothstep(.03,.1,px);
+ float sandH=(min(a.b,.62)*.004+min(fine.b,.62)*.003+rip*.005*windK)*(1.0-wet*.6);
+ float groundH=mix(a.g*.035+b.g*.045+fine.g*.012,a.b*.012+a.g*.01,path);
+ float rockH=plates.r*.07*(midK*.6+.4)+a.r*.012*fineK*(1.0-rockWet*.6);
+ float terrainHeight=mix(mix(groundH,sandH,sand),rockH,rock);
  `);
- shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>\n vec2 nativeNXZ=texture2D(nativeNormal,(vNativeWorld.xz-nativeRect.xy)/nativeRect.zw).rg*2.0-1.0;normal=normalize(mat3(viewMatrix)*vec3(nativeNXZ.x,sqrt(max(1.0-dot(nativeNXZ,nativeNXZ),.0025)),nativeNXZ.y));`);
- };material.customProgramCacheKey=()=> 'native-field-terrain-webgl/1:'+coarse;return material;
+ shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>\n roughnessFactor=clamp(terrainRough,.16,1.0);`);
+ shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>\n normal=normalize(mat3(viewMatrix)*nativeTerrainBump(vNativeWorld,terrainN,terrainHeight));`);
+ };material.customProgramCacheKey=()=> 'native-field-terrain-webgl/2:'+coarse;return material;
 }
 /** A ball strictly inside every actual triangular sky facet is a convex subset
  * of this renderer-created closed sphere. Certify planes once, then compare the
@@ -291,18 +346,19 @@ export function buildWebGLNativeSea(source,data,time,shoreTexture,heightTexture=
 export async function buildWebGLNativeIsland({project,root,camera,options={}}){
  if(typeof options.readNativeIsland!=='function')throw Error('WebGL native island needs its verified source reader.');
  const source=await options.readNativeIsland(project),data=new NativeIslandTerrain({...source.domain,coarse:source.coarse}),group=new T.Group(),time={value:0};root.add(group);
- let disposed=false,bark,plants,water,sky,cache;const ownedTextures=[],tileMeshes=new Map(),arrivalLeases=new Set();
- const dispose=()=>{if(disposed)return;disposed=true;for(const release of arrivalLeases)release();cache?.dispose();source.dispose?.();plants?.dispose();water?.dispose();sky?.dispose();bark?.dispose();for(const mesh of tileMeshes.values()){mesh.geometry.dispose();mesh.material.dispose();mesh.userData.nativeTextures.forEach(t=>t.dispose());}tileMeshes.clear();group.traverse(node=>{if(node.userData.nativeBase){node.geometry.dispose();node.material.dispose();}});group.removeFromParent();for(const value of ownedTextures)value.dispose();};
+ let disposed=false,bark,plants,water,sky,cache,plantMaterials;const ownedTextures=[],tileMeshes=new Map(),arrivalLeases=new Set();
+ const dispose=()=>{if(disposed)return;disposed=true;for(const release of arrivalLeases)release();cache?.dispose();source.dispose?.();plants?.dispose();water?.dispose();sky?.dispose();bark?.dispose();if(plantMaterials)for(const material of Object.values(plantMaterials))material.dispose();for(const mesh of tileMeshes.values()){mesh.geometry.dispose();mesh.material.dispose();mesh.userData.nativeTextures.forEach(t=>t.dispose());}tileMeshes.clear();group.traverse(node=>{if(node.userData.nativeBase){node.geometry.dispose();node.material.dispose();}});group.removeFromParent();for(const value of ownedTextures)value.dispose();};
  try{
-  bark=await(options.prepareVegetationAssets??barkTextures)(source);const nativeDetail=getDetailTexture({upload:false}),detail=texture(nativeDetail.image.data,nativeDetail.width);detail.wrapS=detail.wrapT=T.RepeatWrapping;detail.generateMipmaps=true;detail.minFilter=T.LinearMipmapLinearFilter;ownedTextures.push(detail);
+  bark=await(options.prepareVegetationAssets??barkTextures)(source);const leafAtlas=await(options.prepareLeafAtlas??loadNativeLeafAtlas)();ownedTextures.push(leafAtlas);const nativeDetail=getDetailTexture({upload:false}),detail=texture(nativeDetail.image.data,nativeDetail.width);detail.wrapS=detail.wrapT=T.RepeatWrapping;detail.generateMipmaps=true;detail.minFilter=T.LinearMipmapLinearFilter;ownedTextures.push(detail);
   const grass=texture(source.grassMask.data,source.grassMask.res),shore=texture(source.shore.data,source.shore.res,4,T.FloatType),coarseHeight=texture(source.coarse.heights,source.coarse.res,1,T.FloatType),coarseNormal=texture(source.coarse.normal,source.coarse.res),coarseSplat=texture(source.coarse.splat,source.coarse.res),side=Math.ceil(source.domain.res/128),readyData=new Uint8Array(side*side),ready=texture(readyData,side,1);ready.magFilter=ready.minFilter=T.NearestFilter;ownedTextures.push(grass,shore,coarseHeight,coarseNormal,coarseSplat,ready);
-  const materialFor=(normal,splat,rect,coarse)=>terrainMaterial({normal,splat,rect,domain:source.domain,detail,shore,grass,ready,coarse,time});
+  const windDirection = source.ocean.fft.local.windDirection * Math.PI / 180;
+  const materialFor=(normal,splat,rect,coarse)=>terrainMaterial({normal,splat,rect,domain:source.domain,detail,shore,grass,ready,coarse,time,windDirection});
   const base=new T.Mesh(webGLNativeTerrainTile(data,{x:0,z:0,width:data.res-1,height:data.res-1},Math.round(data.res/source.coarse.res)),materialFor(coarseNormal,coarseSplat,[data.origin,data.origin,data.size,data.size],true));base.userData.nativeBase=true;group.add(base);
   const updateTileGeometry=tile=>{const mesh=tileMeshes.get(tile.id);if(!mesh)return;mesh.geometry.dispose();mesh.geometry=webGLNativeTerrainTile(data,tile);};
   cache=new NativeIslandTiles({tiles:source.tiles,readTile:source.readTile,maxBytes:options.maxBytes,maxConcurrency:options.maxConcurrency,onLoad(tile,decoded){const fields=decoded.fields??decoded;data.apply(tile,decoded);const normal=texture(fields.normal,tile.width),splat=texture(fields.splat,tile.width),mesh=new T.Mesh(webGLNativeTerrainTile(data,tile),materialFor(normal,splat,[data.origin+tile.x,data.origin+tile.z,tile.width,tile.height],false));mesh.userData.nativeTextures=[normal,splat];tileMeshes.set(tile.id,mesh);group.add(mesh);readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=255;ready.needsUpdate=true;for(const other of source.tiles)if(Math.abs(other.x-tile.x)<=128&&Math.abs(other.z-tile.z)<=128)updateTileGeometry(other);},onEvict(tile){const mesh=tileMeshes.get(tile.id);if(mesh){mesh.removeFromParent();mesh.geometry.dispose();mesh.material.dispose();mesh.userData.nativeTextures.forEach(t=>t.dispose());tileMeshes.delete(tile.id);}readyData[Math.floor(tile.z/128)*side+Math.floor(tile.x/128)]=0;ready.needsUpdate=true;}});data.cache=cache;
-  const angle=source.ocean.fft.local.windDirection*Math.PI/180,wind={value:new T.Vector2(Math.sin(angle),Math.cos(angle))},gust={value:new T.Vector2()};
-  const materials={palm:plantMaterial('palm',time,wind,gust,detail,bark.palm),tree:plantMaterial('tree',time,wind,gust,detail,bark.tree)};plants=buildPlants(source,time,detail,materials,options.mainCamera??camera);group.add(plants.root);water=buildWebGLNativeSea(source,data,time,shore,coarseHeight);group.add(water.mesh);sky=buildWebGLNativeSky(project.environment);group.add(sky.mesh);
+  const wind={value:new T.Vector2(Math.sin(windDirection),Math.cos(windDirection))},gust={value:new T.Vector2()};
+  const materials=plantMaterials={palm:plantMaterial('palm',time,wind,gust,detail,bark.palm,leafAtlas),tree:plantMaterial('tree',time,wind,gust,detail,bark.tree,leafAtlas)};plants=buildPlants(source,time,detail,materials,options.mainCamera??camera);group.add(plants.root);water=buildWebGLNativeSea(source,data,time,shore,coarseHeight);group.add(water.mesh);sky=buildWebGLNativeSky(project.environment);group.add(sky.mesh);
   const frustum=new T.Frustum(),vp=new T.Matrix4(),box=new T.Box3(),bindView=viewCamera=>{sky.update(time.value,viewCamera);viewCamera.updateMatrixWorld();vp.multiplyMatrices(viewCamera.projectionMatrix,viewCamera.matrixWorldInverse);frustum.setFromProjectionMatrix(vp);const {x,z}=viewCamera.position;cache.requestView(x,z,2400,tile=>{box.min.set(tile.bounds[0],tile.minHeight??-90,tile.bounds[1]);box.max.set(tile.bounds[2],tile.maxHeight??200,tile.bounds[3]);return frustum.intersectsBox(box)||Math.hypot((tile.bounds[0]+tile.bounds[2])/2-x,(tile.bounds[1]+tile.bounds[3])/2-z)<180;});plants.updateView(viewCamera);};
-  return{data,water,sky,query:water.query,setPlantOccluders:plants.setOccluders,setPlantOcclusionEnabled:plants.setOcclusionEnabled,setEnvironment(value){sky.setEnvironment(value);},async ensureArrival(position){const release=await cache.ensureAt(position[0],position[2],3);arrivalLeases.add(release);return()=>{arrivalLeases.delete(release);release();};},canOccupy(x,z,radius=1){return [[x-radius,z-radius],[x+radius,z-radius],[x-radius,z+radius],[x+radius,z+radius]].every(([px,pz])=>cache.readyAt(px,pz));},bindView,update(dt,viewCamera){time.value+=dt;gust.value.addScaledVector(wind.value,(.7*(project.environment.windSpeed??7)+1.5)*dt);bindView(viewCamera);},stats:()=>({...WEBGL_NATIVE_ISLAND_QUALIFICATION,...cache.stats(),plants:plants.stats(),source:source.sourceStats?.(),terrainPolicy:'exact fine cell heights and captured normal/splat; approximate GLSL surface shading',grassPolicy:'captured density field; blades not implemented'}),dispose(){materials.palm.dispose();materials.tree.dispose();dispose();}};
+  return{data,water,sky,query:water.query,setPlantOccluders:plants.setOccluders,setPlantOcclusionEnabled:plants.setOcclusionEnabled,setEnvironment(value){sky.setEnvironment(value);},async ensureArrival(position){const release=await cache.ensureAt(position[0],position[2],3);arrivalLeases.add(release);return()=>{arrivalLeases.delete(release);release();};},canOccupy(x,z,radius=1){return [[x-radius,z-radius],[x+radius,z-radius],[x-radius,z+radius],[x+radius,z+radius]].every(([px,pz])=>cache.readyAt(px,pz));},bindView,update(dt,viewCamera){time.value+=dt;gust.value.addScaledVector(wind.value,(.7*(project.environment.windSpeed??7)+1.5)*dt);bindView(viewCamera);},stats:()=>({...WEBGL_NATIVE_ISLAND_QUALIFICATION,...cache.stats(),plants:plants.stats(),source:source.sourceStats?.(),terrainPolicy:'exact fine cell heights and captured normal/splat; approximate GLSL surface shading',grassPolicy:'captured density field; blades not implemented'}),dispose};
  }catch(error){dispose();throw error;}
 }

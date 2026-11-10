@@ -21,7 +21,7 @@ test('original native ordering is preserved by the structural depth prepass with
  const normal=new Uint8Array(n*n*4),splat=new Uint8Array(n*n*4);for(let i=0;i<n*n;i++){normal.set([128,128,0,255],i*4);splat.set([255,0,0,0],i*4);}
  const source={domain:{res:n,size:8,origin:-4},coarse:{res:n,heights:new Float32Array(n*n),normal,splat},grassMask:{res:n,data:new Uint8Array(n*n*4)},shore:{res:n,data:new Float32Array(n*n*4)},records,appearance:{swellDir:{x:0,y:-1}},ocean:{level:0,fft:{local:{windDirection:25}},shore:{period:9,amplitude:.34}},tiles:[],readTile:async()=>({fields:{heights:new Float32Array(n*n),normal,splat}})};
  const texture=new T.DataTexture(new Uint8Array([128,128,255,255]),1,1),bark={map:texture,normalMap:texture,orm:texture};
- const native=await buildWebGLNativeIsland({project:{environment:{windSpeed:7}},root,camera,options:{readNativeIsland:async()=>source,prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}})}});
+ const native=await buildWebGLNativeIsland({project:{environment:{windSpeed:7}},root,camera,options:{readNativeIsland:async()=>source,prepareLeafAtlas:async()=>new T.Texture(),prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}})}});
  try{
   native.bindView(camera);const meshes=[];root.traverse(node=>{if(node.userData.nativePlantSpecies)meshes.push(node);});
   assert.equal(native.stats().plants.records,Object.values(records).reduce((sum,a)=>sum+a.length,0));
@@ -47,7 +47,7 @@ test('original native ordering is preserved by the structural depth prepass with
     assert.equal(material.alphaTest,.35);assert.equal(material.transparent,false);
     assert.equal(material.depthTest,true);assert.equal(material.depthWrite,true);
     assert.equal(material.side,T.DoubleSide);assert.equal(material.roughness,.86);
-    assert.equal(material.customProgramCacheKey(),'native-source-plants-webgl/1:'+(isCanopy?'tree':'palm'));
+    assert.equal(material.customProgramCacheKey(),'native-source-plants-webgl/2:'+(isCanopy?'tree':'palm'));
     assert.equal(mesh.material,meshes.find(m=>isCanopy?m.userData.nativePlantSpecies==='trees':m.userData.nativePlantSpecies==='palms').material,species+' material invariant');
     const original=species==='bananas'?factory(variant?23:9):factory();
     const sourceGeometry=isCanopy?Plants.lobeVariantGeometry(original.geometry,Plants.LOBE_TABLE,(variant+(species==='shrubs'?Plants.TREE_VARIANTS:0))*8):species==='palms'&&distant?Plants.buildPalmFar().geometry:original.geometry;
@@ -77,9 +77,9 @@ test('original fine terrain colour order survives first load, neighbor rebuild, 
   readTile:async tile=>{reads.set(tile.id,(reads.get(tile.id)??0)+1);return{fields:{heights:new Float32Array(tileSize*tileSize).fill(tile.id==='b'?4:tile.id==='c'?8:0),normal:normal.slice(0,tileSize*tileSize*4),splat:splat.slice(0,tileSize*tileSize*4)}};}};
  const texture=new T.DataTexture(new Uint8Array([128,128,255,255]),1,1),bark={map:texture,normalMap:texture,orm:texture};
  // Each decoded tile is 64*(4+4+4) bytes. Two fit; the third must evict the LRU.
- const native=await buildWebGLNativeIsland({project:{environment:{windSpeed:7}},root,camera,options:{readNativeIsland:async()=>source,prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}}),maxBytes:2*tileSize*tileSize*12,maxConcurrency:1}});
+ const native=await buildWebGLNativeIsland({project:{environment:{windSpeed:7}},root,camera,options:{readNativeIsland:async()=>source,prepareLeafAtlas:async()=>new T.Texture(),prepareVegetationAssets:async()=>({palm:bark,tree:bark,dispose(){texture.dispose();}}),maxBytes:2*tileSize*tileSize*12,maxConcurrency:1}});
  const fineFor=tile=>{let result;root.traverse(node=>{if(!node.userData.nativeTextures)return;const p=node.geometry.getAttribute('position');if(p.getX(0)===tile.x+.5&&p.getZ(0)===tile.z+.5)result=node;});return result;};
- const checkFine=mesh=>{assert.ok(mesh);assert.equal(mesh.renderOrder,0);assert.equal(mesh.geometry.getAttribute('position').count,81);assert.equal(mesh.geometry.index.count,384);assert.equal(mesh.material.transparent,false);assert.equal(mesh.material.depthTest,true);assert.equal(mesh.material.depthWrite,true);assert.equal(mesh.material.customProgramCacheKey(),'native-field-terrain-webgl/1:false');};
+ const checkFine=mesh=>{assert.ok(mesh);assert.equal(mesh.renderOrder,0);assert.equal(mesh.geometry.getAttribute('position').count,81);assert.equal(mesh.geometry.index.count,384);assert.equal(mesh.material.transparent,false);assert.equal(mesh.material.depthTest,true);assert.equal(mesh.material.depthWrite,true);assert.equal(mesh.material.customProgramCacheKey(),'native-field-terrain-webgl/2:false');};
  try{
   const cache=native.data.cache;let base;root.traverse(node=>{if(node.userData.nativeBase)base=node;});assert.ok(base);assert.equal(base.renderOrder,0);
   await cache.request('a');const firstA=fineFor(tiles[0]);checkFine(firstA);const firstGeometry=firstA.geometry;let firstGeometryDisposed=false;firstGeometry.addEventListener('dispose',()=>{firstGeometryDisposed=true;});

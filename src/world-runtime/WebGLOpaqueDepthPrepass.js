@@ -7,13 +7,16 @@ const QUALIFIED_WAREHOUSE_WORLD_ID='elsemesh.world:2842c4f2-93a0-4492-b942-e53e5
 const QUALIFIED_WAREHOUSE_CONTENT_DIGEST='fcba18b28ac9b8bf7ef52a1fc8ba0d3dc489d0bd4c94c651cdc559a7617a0e5d';
 // Candidate admission is restricted to the exact device/context identity measured
 // locally. Other adapters and unavailable privacy-protected identities stay off.
-const CANDIDATE_WAREHOUSE_CONTENT_DIGEST='78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b';
+const testedWarehouseDigests = new Set([
+ '78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b',
+ '064a7c3dc09ef745ba07fe6fde9916ca2514c450f6958b66c2517602a168d347',
+]);
 const CANDIDATE_RENDERER='ANGLE (Intel, Intel(R) Arc(TM) Graphics (0x00007D55) Direct3D11 vs_5_0 ps_5_0, D3D11)';
 
 /** CPU triangle proof is device independent, but its source cache and local
  * optical qualification cover only this exact authored Fred package. */
 export function isQualifiedWarehousePlantOcclusion(identity){
- return identity?.worldId===QUALIFIED_WAREHOUSE_WORLD_ID&&identity.contentDigest===CANDIDATE_WAREHOUSE_CONTENT_DIGEST;
+ return identity?.worldId===QUALIFIED_WAREHOUSE_WORLD_ID&&testedWarehouseDigests.has(identity.contentDigest);
 }
 
 export function getQualifiedWarehouseDepthOccluders(active){
@@ -36,7 +39,7 @@ export function createQualifiedWarehouseDepthOccluderProvider(renderer){
   }catch{qualified=false;}
  }
  return active=>{
-  if(qualified&&active&&!active.disposed&&active.identity?.worldId===QUALIFIED_WAREHOUSE_WORLD_ID&&active.identity.contentDigest===CANDIDATE_WAREHOUSE_CONTENT_DIGEST)return active.depthOccluders??[];
+  if(qualified&&active&&!active.disposed&&isQualifiedWarehousePlantOcclusion(active.identity))return active.depthOccluders??[];
   return getQualifiedWarehouseDepthOccluders(active);
  };
 }
