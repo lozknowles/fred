@@ -16,9 +16,24 @@ function equalGeometry(a,b){for(const key of ['position','normal','uv'])assert.d
 const tiles=Array.from({length:9},(_,i)=>({id:String(i),x:i%3*128,z:Math.floor(i/3)*128,width:128,height:128}));
 
 test('typed builder exactly preserves Float32 positions, normals, UV, index type and bounds',()=>{
- for(const [res,width,height,step] of [[384,128,128,1],[384,256,256,1],[384,137,119,7],[128,128,128,1]]){
+ for(const [res,width,height,step] of [[384,128,128,1],[384,256,256,1],[384,137,119,7],[128,128,128,1],[768,513,271,1],[768,517,263,7],[32,32,17,1],[16,1,1,1],[16,0,0,1]]){
   const d=dataFor(res),tile={x:0,z:0,width,height};apply(d,{...tile,width:Math.min(width,res),height:Math.min(height,res)});
   const a=original(d,tile,step),b=webGLNativeTerrainTile(d,tile,step);equalGeometry(a,b);a.dispose();b.dispose();
+ }
+});
+
+test('selective normals match all faces on larger rectangular, partial and clamped seams',()=>{
+ for(const [res,width,height] of [[768,257,129],[384,128,64],[258,257,129],[32,1,7]]){
+  const data=dataFor(res),tile={id:'resident',x:0,z:0,width,height};apply(data,tile);
+  const g=webGLNativeTerrainTile(data,tile);
+  const incoming=[{id:'east',x:width,z:0,width:1,height},{id:'south',x:0,z:height,width,height:1},{id:'corner',x:width,z:height,width:1,height:1},{id:'partial',x:width,z:Math.floor(height/3),width:1,height:Math.max(1,Math.floor(height/3))}];
+  for(let revision=1;revision<=2;revision++)for(const next of incoming){
+   apply(data,next,revision);const normal=g.attributes.normal,version=normal.version;
+   const changed=updateWebGLNativeTerrainSeam(data,tile,g,next);
+   assert.equal(g.attributes.normal,normal);assert.equal(normal.version,version+Number(changed));
+   const expected=original(data,tile);equalGeometry(g,expected);expected.dispose();
+  }
+  g.dispose();
  }
 });
 

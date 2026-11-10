@@ -9,7 +9,7 @@ const QUALIFIED_WAREHOUSE_CONTENT_DIGEST='fcba18b28ac9b8bf7ef52a1fc8ba0d3dc489d0
 // locally. Other adapters and unavailable privacy-protected identities stay off.
 const testedWarehouseDigests = new Set([
  '78fdd3bc86c8fc46b86d64372943361b726ef692f9a935237f743ba2a93e212b',
- 'bd165d71b50a287dcc8413aeed628dc3d49e10817c2712cb603e6b09002f8970',
+ '5933d445246a3ee4c2a0c79a0e9e42630b6bec89db48c9ad32318f56f8976172',
 ]);
 const CANDIDATE_RENDERER='ANGLE (Intel, Intel(R) Arc(TM) Graphics (0x00007D55) Direct3D11 vs_5_0 ps_5_0, D3D11)';
 

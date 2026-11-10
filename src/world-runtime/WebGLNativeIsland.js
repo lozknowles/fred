@@ -20,11 +20,88 @@ export function convertNativePlantGeometry(source,{leafStride=1}={}){
  for(let i=0;i<source.index.count;i+=3){const a=source.index.getX(i),leaf=part.getX(a)===1||part.getX(a)===4;if(leaf&&leafStride>1&&Math.floor(card++/2)%leafStride!==0)continue;indices.push(a,source.index.getX(i+1),source.index.getX(i+2));}
  geometry.setIndex(indices);geometry.computeBoundingSphere();return geometry;
 }
+// Matches Three's (C-B) x (A-B), Float32 write after every face addition,
+// and final reciprocal-length multiplication. The regular grid fixes face order.
+function terrainGridNormals(geometry, nx, nz, east = false, south = false) {
+ const positions = geometry.attributes.position.array;
+ let attribute = geometry.attributes.normal;
+ if (!attribute) {
+  attribute = new T.BufferAttribute(new Float32Array(positions.length), 3);
+  geometry.setAttribute('normal', attribute);
+ }
+ const normals = attribute.array;
+ const face = (a, b, c, target = -1) => {
+  const ai = a * 3, bi = b * 3, ci = c * 3;
+  const cbx = positions[ci] - positions[bi];
+  const cby = positions[ci + 1] - positions[bi + 1];
+  const cbz = positions[ci + 2] - positions[bi + 2];
+  const abx = positions[ai] - positions[bi];
+  const aby = positions[ai + 1] - positions[bi + 1];
+  const abz = positions[ai + 2] - positions[bi + 2];
+  const x = cby * abz - cbz * aby;
+  const y = cbz * abx - cbx * abz;
+  const z = cbx * aby - cby * abx;
+  if (target >= 0) {
+   const offset = target * 3;
+   normals[offset] += x;
+   normals[offset + 1] += y;
+   normals[offset + 2] += z;
+  } else {
+   normals[ai] += x;
+   normals[ai + 1] += y;
+   normals[ai + 2] += z;
+   normals[bi] += x;
+   normals[bi + 1] += y;
+   normals[bi + 2] += z;
+   normals[ci] += x;
+   normals[ci + 1] += y;
+   normals[ci + 2] += z;
+  }
+ };
+ const normalize = vertex => {
+  const offset = vertex * 3;
+  const x = normals[offset], y = normals[offset + 1], z = normals[offset + 2];
+  const reciprocalLength = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+  normals[offset] = x * reciprocalLength;
+  normals[offset + 1] = y * reciprocalLength;
+  normals[offset + 2] = z * reciprocalLength;
+ };
+ if (!east && !south) {
+  normals.fill(0);
+  for (let z = 0; z < nz - 1; z++) {
+   for (let x = 0; x < nx - 1; x++) {
+    const vertex = z * nx + x;
+    face(vertex, vertex + nx, vertex + 1);
+    face(vertex + 1, vertex + nx, vertex + nx + 1);
+   }
+  }
+  for (let vertex = 0; vertex < nx * nz; vertex++) normalize(vertex);
+ } else {
+  // Only vertices sharing a face with a changed east/south boundary can differ.
+  // Rebuild each from all adjacent faces in the original global face order.
+  for (let z = 0; z < nz; z++) {
+   const firstX = south && z >= nz - 2 ? 0 : east ? Math.max(0, nx - 2) : nx;
+   for (let x = firstX; x < nx; x++) {
+    const vertex = z * nx + x, offset = vertex * 3;
+    normals[offset] = normals[offset + 1] = normals[offset + 2] = 0;
+    for (let cellZ = Math.max(0, z - 1); cellZ <= Math.min(nz - 2, z); cellZ++) {
+     for (let cellX = Math.max(0, x - 1); cellX <= Math.min(nx - 2, x); cellX++) {
+      const a = cellZ * nx + cellX, b = a + nx, c = a + 1, d = b + 1;
+      if (vertex === a || vertex === b || vertex === c) face(a, b, c, vertex);
+      if (vertex === c || vertex === b || vertex === d) face(c, b, d, vertex);
+     }
+    }
+    normalize(vertex);
+   }
+  }
+ }
+ attribute.needsUpdate = true;
+}
 export function webGLNativeTerrainTile(data,tile,step=1){
  const nx=Math.ceil(tile.width/step)+1,nz=Math.ceil(tile.height/step)+1,positions=new Float32Array(nx*nz*3),uv=new Float32Array(nx*nz*2),indices=new (nx*nz-1>=65535?Uint32Array:Uint16Array)((nx-1)*(nz-1)*6);
  let cursor=0;
  for(let z=0;z<nz;z++)for(let x=0;x<nx;x++){const gx=Math.min(data.res-1,tile.x+Math.min(tile.width,x*step)),gz=Math.min(data.res-1,tile.z+Math.min(tile.height,z*step)),i=z*nx+x;positions[i*3]=data.origin+(gx+.5)*data.texel;positions[i*3+1]=data.heights[gz*data.res+gx];positions[i*3+2]=data.origin+(gz+.5)*data.texel;uv[i*2]=x/(nx-1);uv[i*2+1]=z/(nz-1);if(x<nx-1&&z<nz-1){indices[cursor++]=i;indices[cursor++]=i+nx;indices[cursor++]=i+1;indices[cursor++]=i+1;indices[cursor++]=i+nx;indices[cursor++]=i+nx+1;}}
- const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.BufferAttribute(positions,3));geometry.setAttribute('uv',new T.BufferAttribute(uv,2));geometry.setIndex(new T.BufferAttribute(indices,1));geometry.computeVertexNormals();return geometry;
+ const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.BufferAttribute(positions,3));geometry.setAttribute('uv',new T.BufferAttribute(uv,2));geometry.setIndex(new T.BufferAttribute(indices,1));terrainGridNormals(geometry,nx,nz);return geometry;
 }
 /** Fine tiles own their interior, and borrow only the inclusive east/south seam.
  * A newly applied tile can therefore change resident west/north/northwest seams.
@@ -32,12 +109,12 @@ export function webGLNativeTerrainTile(data,tile,step=1){
  */
 export function updateWebGLNativeTerrainSeam(data,tile,geometry,incoming){
  if(tile.id===incoming.id||tile.x>incoming.x+incoming.width-1||tile.z>incoming.z+incoming.height-1||tile.x+tile.width<incoming.x||tile.z+tile.height<incoming.z)return false;
- const nx=tile.width+1,nz=tile.height+1,position=geometry.attributes.position,p=position.array;let changed=false;
- const update=(x,z)=>{const gx=Math.min(data.res-1,tile.x+x),gz=Math.min(data.res-1,tile.z+z);if(gx<incoming.x||gx>=incoming.x+incoming.width||gz<incoming.z||gz>=incoming.z+incoming.height)return;const i=(z*nx+x)*3+1,h=data.heights[gz*data.res+gx];if(p[i]!==h){p[i]=h;changed=true;}};
+ const nx=tile.width+1,nz=tile.height+1,position=geometry.attributes.position,p=position.array;let changed=false,east=false,south=false;
+ const update=(x,z)=>{const gx=Math.min(data.res-1,tile.x+x),gz=Math.min(data.res-1,tile.z+z);if(gx<incoming.x||gx>=incoming.x+incoming.width||gz<incoming.z||gz>=incoming.z+incoming.height)return;const i=(z*nx+x)*3+1,h=data.heights[gz*data.res+gx];if(p[i]!==h){p[i]=h;changed=true;east ||= x===nx-1;south ||= z===nz-1;}};
  for(let z=0;z<nz-1;z++)update(nx-1,z);
  for(let x=0;x<nx;x++)update(x,nz-1);
  if(!changed)return false;
- position.needsUpdate=true;geometry.computeVertexNormals();
+ position.needsUpdate=true;terrainGridNormals(geometry,nx,nz,east,south);
  if(geometry.boundingBox!==null)geometry.computeBoundingBox();
  if(geometry.boundingSphere!==null)geometry.computeBoundingSphere();
  return true;
