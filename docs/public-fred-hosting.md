@@ -20,6 +20,15 @@ source/tools/tests, package metadata, private configuration, publication receipt
 and portrait presets are refused even if listed. Deploy to an immutable release
 directory; hashes are verified at startup, not on every response.
 
+At startup the server also builds gzip variants of verified `.bin`, `.json`,
+`.js`, and `.css` files when encoding reduces their size. No request triggers
+compression work. Each variant has an ETag based on its encoded bytes,
+`Vary: Accept-Encoding`, and its encoded Content-Length; the browser receives
+exact original bytes after decoding. Range responses retain the original
+representation and honor matching original If-Range validators. No compression
+sidecar paths become public. The measured 12 MB opening-island binary transfers
+as 4.4 MB; actual browser acceptance remains necessary for each public route.
+
 The intended always-on host is hpubuntu. An isolated Tailscale Funnel HTTPS
 listener on port 8443 can proxy to this profile's dedicated loopback port without
 changing the existing port 443 routes. Record `tailscale funnel status --json`
