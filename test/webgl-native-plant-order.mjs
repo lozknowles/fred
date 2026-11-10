@@ -68,7 +68,7 @@ test('original native ordering is preserved by the structural depth prepass with
  assert.equal(root.children.length,0);
 });
 
-test('original fine terrain colour order survives first load, neighbor rebuild, eviction and reload',async()=>{
+test('original fine terrain colour order survives first load, seam update, eviction and reload',async()=>{
  const res=16,tileSize=8,root=new T.Group(),camera=new T.PerspectiveCamera();
  const records=Object.fromEntries(Object.keys(factories).map(name=>[name,[]]));
  const tiles=[{id:'a',x:0,z:0},{id:'b',x:8,z:0},{id:'c',x:0,z:8}].map(t=>({...t,width:tileSize,height:tileSize,bounds:[t.x,t.z,t.x+tileSize,t.z+tileSize],minHeight:0,maxHeight:8}));
@@ -84,9 +84,9 @@ test('original fine terrain colour order survives first load, neighbor rebuild, 
   const cache=native.data.cache;let base;root.traverse(node=>{if(node.userData.nativeBase)base=node;});assert.ok(base);assert.equal(base.renderOrder,0);
   await cache.request('a');const firstA=fineFor(tiles[0]);checkFine(firstA);const firstGeometry=firstA.geometry;let firstGeometryDisposed=false;firstGeometry.addEventListener('dispose',()=>{firstGeometryDisposed=true;});
   const initialRightEdgeHeight=firstGeometry.getAttribute('position').getY(8);assert.equal(initialRightEdgeHeight,0);
-  await cache.request('b');const firstB=fineFor(tiles[1]);checkFine(firstB);assert.equal(fineFor(tiles[0]),firstA,'neighbor refresh retains the same mesh');assert.notEqual(firstA.geometry,firstGeometry,'neighbor arrival rebuilds geometry');assert.equal(firstGeometryDisposed,true);assert.equal(firstA.geometry.getAttribute('position').getY(8),4,'neighbor captured heights reach the shared boundary');checkFine(firstA);
+  await cache.request('b');const firstB=fineFor(tiles[1]);checkFine(firstB);assert.equal(fineFor(tiles[0]),firstA,'neighbor refresh retains the same mesh');assert.equal(firstA.geometry,firstGeometry,'neighbor arrival updates the resident seam in place');assert.equal(firstGeometryDisposed,false);assert.equal(firstA.geometry.getAttribute('position').getY(8),4,'neighbor captured heights reach the shared boundary');checkFine(firstA);
   let materialDisposed=false;firstA.material.addEventListener('dispose',()=>{materialDisposed=true;});const disposedTextures=new Set();firstA.userData.nativeTextures.forEach(t=>t.addEventListener('dispose',()=>disposedTextures.add(t)));
-  await cache.request('c');assert.equal(fineFor(tiles[0]),undefined,'unretained oldest tile is actually evicted');assert.equal(firstA.parent,null);assert.equal(materialDisposed,true);assert.equal(disposedTextures.size,2);checkFine(fineFor(tiles[2]));assert.equal(cache.entries.has('a'),false);
+  await cache.request('c');assert.equal(fineFor(tiles[0]),undefined,'unretained oldest tile is actually evicted');assert.equal(firstA.parent,null);assert.equal(firstGeometryDisposed,true,'eviction releases the resident geometry');assert.equal(materialDisposed,true);assert.equal(disposedTextures.size,2);checkFine(fineFor(tiles[2]));assert.equal(cache.entries.has('a'),false);
   await cache.request('a');const recreated=fineFor(tiles[0]);checkFine(recreated);assert.notEqual(recreated,firstA,'reloading creates a fresh ordered fine mesh');assert.notEqual(recreated.material,firstA.material);assert.equal(reads.get('a'),2);assert.equal(native.stats().residentTiles,2);assert.deepEqual(native.stats().failures,[]);assert.equal(base.renderOrder,0);assert.equal(root.getObjectByName('native-island-webgl-sky').renderOrder,-1000);
  }finally{native.dispose();}
  assert.equal(root.children.length,0);
