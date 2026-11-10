@@ -1,15 +1,34 @@
 {
-  "schema": "warehouse-library-detail-verification/1",
+  "schema": "warehouse-library-detail-verification/2",
   "worldId": "elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319",
-  "snapshot": "9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4",
+  "snapshot": "79f7002222b7ab39b0d552abc73866594b2de43df0b0a93b0e082c7bea27dd97",
   "assets": 11,
   "triangles": 47903,
   "sourcePrimitives": 27,
-  "addedVisualObjects": 11,
-  "retiredVisualRecords": 34,
+  "effectiveInstanceTriangles": 73031,
+  "effectiveInstancePrimitives": 32,
+  "chaiseInstances": 2,
+  "chaisePrimitivesPerInstance": 5,
+  "addedVisualObjects": 12,
+  "retiredVisualRecords": 39,
   "collisionBoxesUnchanged": 116,
   "interactionsUnchanged": 1,
-  "untouchedOriginalObjects": 1699,
+  "untouchedOriginalObjects": 1694,
+  "loungeSupport": [
+    {
+      "id": "warehouse:detail:chaise",
+      "bottom": 3.05
+    },
+    {
+      "id": "warehouse:detail:ottoman",
+      "bottom": 3.0825
+    },
+    {
+      "id": "warehouse:detail:chaise-return",
+      "bottom": 3.0825
+    }
+  ],
+  "returnAdjacentChaiseGap": 0.05,
   "nativeVisualAcceptance": "pending parent review",
   "fpsAcceptance": "pending parent device review"
 }

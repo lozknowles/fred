@@ -1,10 +1,288 @@
 {
-  "snapshot": "11e0ad8bd0f777343e2dd9986d4d5851aab384c2ea8c2d104deb08571c0c37a0",
-  "contentDigest": "4babe330f0a71dfd98ec16d120991fa00058a0aa001e91595dcf2000e7af92e3",
-  "sourceFront": "+Z for source chaise/appliance models; yaw PI gives room-facing -Z",
+  "snapshot": "79f7002222b7ab39b0d552abc73866594b2de43df0b0a93b0e082c7bea27dd97",
+  "contentDigest": "5933d445246a3ee4c2a0c79a0e9e42630b6bec89db48c9ad32318f56f8976172",
+  "sourceFront": "+Z for chaise/appliances; chaise yaw PI gives world -Z, return yaw PI/2 gives world +X",
   "support": {
     "worktopTop": 3.95,
-    "sideTableTop": 3.7
+    "sideTableTop": 3.7,
+    "lounge": [
+      {
+        "id": "warehouse:detail:chaise",
+        "contactBandLocalY": [
+          -0.5,
+          -0.49
+        ],
+        "contactVertices": 108,
+        "rugs": [
+          {
+            "id": "warehouse:object:0518",
+            "assetId": "warehouse:box-rug",
+            "assetSHA256": "4d9ff19abb424abaf8091301e7b52e00e29108d6fecdc10119d8fb556428f084",
+            "assetBounds": {
+              "min": [
+                -0.5,
+                -0.5,
+                -0.5
+              ],
+              "max": [
+                0.5,
+                0.5,
+                0.5
+              ]
+            },
+            "position": [
+              -9,
+              3.03,
+              -76.2
+            ],
+            "scale": [
+              8,
+              0.04,
+              6
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "top": 3.05,
+            "contactVertices": 60
+          }
+        ],
+        "bottom": 3.05,
+        "position": [
+          -8.85,
+          3.75,
+          -73.7
+        ],
+        "scale": [
+          5.5,
+          1.4,
+          1.7
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ]
+      },
+      {
+        "id": "warehouse:detail:ottoman",
+        "contactBandLocalY": [
+          -0.5,
+          -0.49
+        ],
+        "contactVertices": 462,
+        "rugs": [
+          {
+            "id": "warehouse:object:0518",
+            "assetId": "warehouse:box-rug",
+            "assetSHA256": "4d9ff19abb424abaf8091301e7b52e00e29108d6fecdc10119d8fb556428f084",
+            "assetBounds": {
+              "min": [
+                -0.5,
+                -0.5,
+                -0.5
+              ],
+              "max": [
+                0.5,
+                0.5,
+                0.5
+              ]
+            },
+            "position": [
+              -9,
+              3.03,
+              -76.2
+            ],
+            "scale": [
+              8,
+              0.04,
+              6
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "top": 3.05,
+            "contactVertices": 462
+          },
+          {
+            "id": "warehouse:object:0519",
+            "assetId": "warehouse:box-rugLight",
+            "assetSHA256": "8b8048287299b9ed6ef87e3fe8e0bf471b4d85055ea88f518b8d34aa08d06069",
+            "assetBounds": {
+              "min": [
+                -0.5,
+                -0.5,
+                -0.5
+              ],
+              "max": [
+                0.5,
+                0.5,
+                0.5
+              ]
+            },
+            "position": [
+              -8.5,
+              3.06,
+              -76.5
+            ],
+            "scale": [
+              5,
+              0.045,
+              3.5
+            ],
+            "rotation": [
+              0,
+              0.08,
+              0
+            ],
+            "top": 3.0825,
+            "contactVertices": 124
+          }
+        ],
+        "bottom": 3.0825,
+        "position": [
+          -5.9,
+          3.3925,
+          -75
+        ],
+        "scale": [
+          1.35,
+          0.62,
+          1.05
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "id": "warehouse:detail:chaise-return",
+        "contactBandLocalY": [
+          -0.5,
+          -0.49
+        ],
+        "contactVertices": 108,
+        "rugs": [
+          {
+            "id": "warehouse:object:0518",
+            "assetId": "warehouse:box-rug",
+            "assetSHA256": "4d9ff19abb424abaf8091301e7b52e00e29108d6fecdc10119d8fb556428f084",
+            "assetBounds": {
+              "min": [
+                -0.5,
+                -0.5,
+                -0.5
+              ],
+              "max": [
+                0.5,
+                0.5,
+                0.5
+              ]
+            },
+            "position": [
+              -9,
+              3.03,
+              -76.2
+            ],
+            "scale": [
+              8,
+              0.04,
+              6
+            ],
+            "rotation": [
+              0,
+              0,
+              0
+            ],
+            "top": 3.05,
+            "contactVertices": 108
+          },
+          {
+            "id": "warehouse:object:0519",
+            "assetId": "warehouse:box-rugLight",
+            "assetSHA256": "8b8048287299b9ed6ef87e3fe8e0bf471b4d85055ea88f518b8d34aa08d06069",
+            "assetBounds": {
+              "min": [
+                -0.5,
+                -0.5,
+                -0.5
+              ],
+              "max": [
+                0.5,
+                0.5,
+                0.5
+              ]
+            },
+            "position": [
+              -8.5,
+              3.06,
+              -76.5
+            ],
+            "scale": [
+              5,
+              0.045,
+              3.5
+            ],
+            "rotation": [
+              0,
+              0.08,
+              0
+            ],
+            "top": 3.0825,
+            "contactVertices": 36
+          }
+        ],
+        "bottom": 3.0825,
+        "position": [
+          -11.05,
+          3.575216769620361,
+          -75.85
+        ],
+        "scale": [
+          2.5,
+          0.9854335392407219,
+          1.0199470688442047
+        ],
+        "rotation": [
+          0,
+          1.5707963267948966,
+          0
+        ]
+      }
+    ]
+  },
+  "returnFit": {
+    "sourceBounds": [
+      [
+        -2.1065452098846436,
+        -0.14609655737876892,
+        -0.0011612772941589355
+      ],
+      [
+        0.7337742447853088,
+        1.0126936435699463,
+        1.1184171438217163
+      ]
+    ],
+    "sourceSize": [
+      2.8403194546699524,
+      1.1587902009487152,
+      1.1195784211158752
+    ],
+    "length": 2.5,
+    "centerOffsetZ": -0.25,
+    "longChaiseAabbMinZ": -74.55,
+    "returnAabbMaxZ": -74.6,
+    "gap": 0.05,
+    "unchangedColliderIds": [
+      "warehouse:object:0521",
+      "warehouse:object:0530"
+    ]
   },
   "corrections": [
     {
@@ -52,6 +330,210 @@
           5.5,
           1.4,
           1.7
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:chaise-return",
+      "before": {
+        "id": "warehouse:detail:chaise-return",
+        "name": "BlenderKit source-proportioned lounge return chaise",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -8.85,
+          3.95,
+          -73.7
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          5.5,
+          1.4,
+          1.7
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:chaise-return",
+        "name": "BlenderKit source-proportioned lounge return chaise",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -11.05,
+          0,
+          -75.85
+        ],
+        "rotation": [
+          0,
+          1.5707963267948966,
+          0
+        ],
+        "scale": [
+          2.5,
+          0.9854335392407219,
+          1.0199470688442047
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:chaise",
+      "before": {
+        "id": "warehouse:detail:chaise",
+        "name": "BlenderKit sculpted timber chaise with woven cushions",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -8.85,
+          3.95,
+          -73.7
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          5.5,
+          1.4,
+          1.7
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:chaise",
+        "name": "BlenderKit sculpted timber chaise with woven cushions",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -8.85,
+          3.75,
+          -73.7
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          5.5,
+          1.4,
+          1.7
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:ottoman",
+      "before": {
+        "id": "warehouse:detail:ottoman",
+        "name": "BlenderKit matching round ottoman",
+        "kind": "glb",
+        "assetId": "warehouse-detail:ottoman",
+        "position": [
+          -5.9,
+          3.55,
+          -75
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.35,
+          0.62,
+          1.05
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:ottoman",
+        "name": "BlenderKit matching round ottoman",
+        "kind": "glb",
+        "assetId": "warehouse-detail:ottoman",
+        "position": [
+          -5.9,
+          3.3925,
+          -75
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.35,
+          0.62,
+          1.05
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:chaise-return",
+      "before": {
+        "id": "warehouse:detail:chaise-return",
+        "name": "BlenderKit source-proportioned lounge return chaise",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -11.05,
+          0,
+          -75.85
+        ],
+        "rotation": [
+          0,
+          1.5707963267948966,
+          0
+        ],
+        "scale": [
+          2.5,
+          0.9854335392407219,
+          1.0199470688442047
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:chaise-return",
+        "name": "BlenderKit source-proportioned lounge return chaise",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -11.05,
+          3.575216769620361,
+          -75.85
+        ],
+        "rotation": [
+          0,
+          1.5707963267948966,
+          0
+        ],
+        "scale": [
+          2.5,
+          0.9854335392407219,
+          1.0199470688442047
         ],
         "color": "#ffffff",
         "visible": true,

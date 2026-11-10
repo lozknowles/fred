@@ -1,7 +1,7 @@
 {
   "baseSnapshot": "bde9512c66afdb280ff1e0f9177a68d3d0655a474e35547626503db0ec72e191",
-  "snapshot": "9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4",
-  "contentDigest": "bd165d71b50a287dcc8413aeed628dc3d49e10817c2712cb603e6b09002f8970",
+  "snapshot": "79f7002222b7ab39b0d552abc73866594b2de43df0b0a93b0e082c7bea27dd97",
+  "contentDigest": "5933d445246a3ee4c2a0c79a0e9e42630b6bec89db48c9ad32318f56f8976172",
   "assets": [
     {
       "id": "warehouse-detail:chaise",
@@ -1010,6 +1010,141 @@
         "visible": true,
         "collision": "none"
       }
+    },
+    {
+      "id": "warehouse:object:0530",
+      "before": {
+        "id": "warehouse:object:0530",
+        "name": "sectional return base",
+        "kind": "glb",
+        "assetId": "warehouse:box-wood",
+        "position": [
+          -11.05,
+          3.4,
+          -75.6
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.7,
+          0.22,
+          2.5
+        ],
+        "color": "#765238",
+        "visible": true,
+        "collision": "solid"
+      }
+    },
+    {
+      "id": "warehouse:object:0531",
+      "before": {
+        "id": "warehouse:object:0531",
+        "name": "sectional return seat",
+        "kind": "glb",
+        "assetId": "warehouse:sphere-fabric",
+        "position": [
+          -11.05,
+          3.69,
+          -74.75
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.4,
+          0.38,
+          0.88
+        ],
+        "color": "#8f8578",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:object:0532",
+      "before": {
+        "id": "warehouse:object:0532",
+        "name": "sectional return seat",
+        "kind": "glb",
+        "assetId": "warehouse:sphere-fabric",
+        "position": [
+          -11.05,
+          3.69,
+          -75.75
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.4,
+          0.38,
+          0.88
+        ],
+        "color": "#8f8578",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:object:0533",
+      "before": {
+        "id": "warehouse:object:0533",
+        "name": "sectional return seat",
+        "kind": "glb",
+        "assetId": "warehouse:sphere-fabric",
+        "position": [
+          -11.05,
+          3.69,
+          -76.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.4,
+          0.38,
+          0.88
+        ],
+        "color": "#8f8578",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:object:0540",
+      "before": {
+        "id": "warehouse:object:0540",
+        "name": "contrasting lounge cushion",
+        "kind": "glb",
+        "assetId": "warehouse:sphere-charcoal",
+        "position": [
+          -11.06,
+          4.22,
+          -75.95
+        ],
+        "rotation": [
+          0,
+          0.1,
+          -0.1
+        ],
+        "scale": [
+          0.68,
+          0.64,
+          0.2
+        ],
+        "color": "#303332",
+        "visible": true,
+        "collision": "none"
+      }
     }
   ],
   "added": [
@@ -1020,7 +1155,7 @@
       "assetId": "warehouse-detail:chaise",
       "position": [
         -8.85,
-        3.95,
+        3.75,
         -73.7
       ],
       "rotation": [
@@ -1044,7 +1179,7 @@
       "assetId": "warehouse-detail:ottoman",
       "position": [
         -5.9,
-        3.55,
+        3.3925,
         -75
       ],
       "rotation": [
@@ -1272,6 +1407,30 @@
         1.3252233289839905,
         1.3252233289839905,
         1.3252233289839905
+      ],
+      "color": "#ffffff",
+      "visible": true,
+      "collision": "none"
+    },
+    {
+      "id": "warehouse:detail:chaise-return",
+      "name": "BlenderKit source-proportioned lounge return chaise",
+      "kind": "glb",
+      "assetId": "warehouse-detail:chaise",
+      "position": [
+        -11.05,
+        3.575216769620361,
+        -75.85
+      ],
+      "rotation": [
+        0,
+        1.5707963267948966,
+        0
+      ],
+      "scale": [
+        2.5,
+        0.9854335392407219,
+        1.0199470688442047
       ],
       "color": "#ffffff",
       "visible": true,
