@@ -308,14 +308,14 @@ test('source palm triangles use fine shader bounds rather than whole-plant boxes
  assert(boxes.some(b=>b.max[1]<whole.max[1]-2),'some geometry is bounded more tightly than the entire palm');
  geometry.dispose();source.geometry.dispose();
 });
-test('renderer-owned WebGL palms use shader-aligned bounds without false below-floor occlusion',()=>{
+for(const version of [1,2])test('renderer-owned WebGL palm shader '+version+' uses accurate sight bounds',()=>{
  const f=fixture(),local={min:[-.5,-.5,-.5],max:[.5,.5,.5],radius:Math.sqrt(.75)};
  const distant=new T.Matrix4().makeTranslation(25,3,-100);
  const tight=webGLPalmOcclusionBounds(local,distant,{height:15,lean:.3,windStrength:1,windLength:1});
  assert(tight.min[1]>1,'plant bounds stay near the real base height');
  assert(tight.max[2]<-90,'distant palm cannot overreach the TV');
  const geometry=new T.BoxGeometry(1,1,1);geometry.setAttribute('iPlant',new T.InstancedBufferAttribute(Float32Array.from([0,.3,15,1]),4));geometry.setAttribute('iRecord',new T.InstancedBufferAttribute(Float32Array.from([0,1,0,0]),4));
- const material=new T.MeshStandardMaterial();material.customProgramCacheKey=()=> 'native-source-plants-webgl/1:palm|weather-shelter-v1';material.userData.nativeWindStrength=1;material.userData.nativeWindVector=new T.Vector2(1,0);
+ const material=new T.MeshStandardMaterial();material.customProgramCacheKey=()=> 'native-source-plants-webgl/'+version+':palm|weather-shelter-v1';material.userData.nativeWindStrength=1;material.userData.nativeWindVector=new T.Vector2(1,0);
  const plant=new T.InstancedMesh(geometry,material,1);plant.userData.mediaOcclusionPlant='native-palm-v1';plant.setMatrixAt(0,distant);f.root.add(plant);
  let proof=collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'});
  assert.equal(proof.bounds.length,0,'far palm does not black out warehouse TV');

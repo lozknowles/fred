@@ -344,11 +344,13 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
     else if(node.isSkinnedMesh){if(typeof node.computeBoundingBox!=='function')reasons.push('Animated mesh bounds unavailable');else{node.computeBoundingBox();const b=node.boundingBox;if(!b)reasons.push('Animated mesh bounds unavailable');else bounds.push(transformedBounds({min:b.min.toArray(),max:b.max.toArray()},node.matrixWorld));}}
     else if(node.isInstancedMesh||node.instanceMatrix){const count=node.count??0,matrices=node.instanceMatrix?.array;if(!matrices)reasons.push('Instance transforms unavailable');else{
      const plant=node.geometry.attributes?.iPlant,record=node.geometry.attributes?.iRecord,windMeta=node.material?.userData,windVector=windMeta?.nativeWindVector;
-     const stamp=[node.instanceMatrix.version,plant?.version,record?.version,count,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,...node.matrixWorld.elements].join(',');let cached=instanceBoundsCache.get(node);
+     // Both released palm material versions use the same vertex displacement. Version 2 changes the leaf surface.
+     const provenPalm=node.userData?.mediaOcclusionPlant==='native-palm-v1'&&/^native-source-plants-webgl\/(?:1|2):palm(?:\||$)/.test(key);
+     const stamp=[provenPalm,node.instanceMatrix.version,plant?.version,record?.version,count,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,...node.matrixWorld.elements].join(',');let cached=instanceBoundsCache.get(node);
      if(cached?.stamp!==stamp){const entries=[],grid=new Map(),cell=32,w=Math.max((active.project?.environment.windSpeed??6)*.1,.03);let radius=0;
       for(let i=0;i<count;i++){
        const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16)),scale=Math.max(Math.hypot(...matrix.slice(0,3)),Math.hypot(...matrix.slice(4,7)),Math.hypot(...matrix.slice(8,11)));
-       const palm=node.userData?.mediaOcclusionPlant==='native-palm-v1'&&record?.getZ(i)<=.5&&/native-source-plants-webgl\/1:palm/.test(key);
+       const palm=provenPalm&&record?.getZ(i)<=.5;
        const tight=palm?webGLPalmOcclusionBounds(local,matrix,{height:Math.abs(plant.getZ(i)),lean:Math.abs(plant.getY(i)),windStrength:windMeta?.nativeWindStrength,windLength:Math.hypot(windVector?.x??NaN,windVector?.y??NaN)}):null;
        const pad=plant?Math.abs(plant.getZ(i))*scale*(1+Math.abs(plant.getY(i))+.017*w*w+.013*w)+.2:0,b=tight??transformedBounds(local,matrix,pad);
        const x=(b.min[0]+b.max[0])/2,z=(b.min[2]+b.max[2])/2;radius=Math.max(radius,(b.max[0]-b.min[0])/2,(b.max[2]-b.min[2])/2);entries.push(b);
@@ -356,7 +358,7 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
       }
       cached={stamp,entries,grid,cell,radius,details:new Map()};instanceBoundsCache.set(node,cached);}
      for(let z=Math.floor((cone.min[2]-cached.radius)/cached.cell);z<=Math.floor((cone.max[2]+cached.radius)/cached.cell);z++)for(let x=Math.floor((cone.min[0]-cached.radius)/cached.cell);x<=Math.floor((cone.max[0]+cached.radius)/cached.cell);x++)for(const i of cached.grid.get(x+':'+z)??[]){stats.instances++;const b=cached.entries[i];if(boxIntersects(b,cone)){
-       const palm=node.userData?.mediaOcclusionPlant==='native-palm-v1'&&record?.getZ(i)<=.5&&/native-source-plants-webgl\/1:palm/.test(key);
+       const palm=provenPalm&&record?.getZ(i)<=.5;
        if(palm){
         let details=cached.details.get(i);
         if(!details){const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16));details=webGLPalmTriangleBounds(node.geometry,matrix,{height:Math.abs(plant.getZ(i)),lean:plant.getY(i),angle:plant.getX(i),windStrength:windMeta?.nativeWindStrength,windLength:Math.hypot(windVector?.x??NaN,windVector?.y??NaN)});if(details){details.forEach((piece,triangle)=>piece.source={kind:'palm-triangle',species:node.userData?.nativePlantSpecies,index:i,triangle});cached.details.set(i,details);}}
