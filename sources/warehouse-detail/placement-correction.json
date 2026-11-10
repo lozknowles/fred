@@ -1,0 +1,419 @@
+{
+  "snapshot": "11e0ad8bd0f777343e2dd9986d4d5851aab384c2ea8c2d104deb08571c0c37a0",
+  "contentDigest": "4babe330f0a71dfd98ec16d120991fa00058a0aa001e91595dcf2000e7af92e3",
+  "sourceFront": "+Z for source chaise/appliance models; yaw PI gives room-facing -Z",
+  "support": {
+    "worktopTop": 3.95,
+    "sideTableTop": 3.7
+  },
+  "corrections": [
+    {
+      "id": "warehouse:detail:chaise",
+      "before": {
+        "id": "warehouse:detail:chaise",
+        "name": "BlenderKit sculpted timber chaise with woven cushions",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -8.85,
+          3.95,
+          -73.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          5.5,
+          1.4,
+          1.7
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:chaise",
+        "name": "BlenderKit sculpted timber chaise with woven cushions",
+        "kind": "glb",
+        "assetId": "warehouse-detail:chaise",
+        "position": [
+          -8.85,
+          3.95,
+          -73.7
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          5.5,
+          1.4,
+          1.7
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:kitchenstove",
+      "before": {
+        "id": "warehouse:detail:kitchenstove",
+        "name": "Library built in oven with detailed controls and chrome handles",
+        "kind": "glb",
+        "assetId": "warehouse-detail:kitchenstove",
+        "position": [
+          7.739999999999999,
+          3.34,
+          -72.34
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          3.302325581395349,
+          3.3777777777777778,
+          0.39999999999999997
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:kitchenstove",
+        "name": "Library built in oven with detailed controls and chrome handles",
+        "kind": "glb",
+        "assetId": "warehouse-detail:kitchenstove",
+        "position": [
+          9.16,
+          3.34,
+          -72.54
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          3.302325581395349,
+          3.3777777777777778,
+          1.511111111111111
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:toaster",
+      "before": {
+        "id": "warehouse:detail:toaster",
+        "name": "Library toaster",
+        "kind": "glb",
+        "assetId": "warehouse-detail:toaster",
+        "position": [
+          2.2,
+          4.02,
+          -74.9
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:toaster",
+        "name": "Library toaster",
+        "kind": "glb",
+        "assetId": "warehouse-detail:toaster",
+        "position": [
+          2.3,
+          3.95,
+          -75.1
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          1.5958827077278066,
+          1.5958827077278066,
+          1.5958827077278066
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:kitchencoffeemachine",
+      "before": {
+        "id": "warehouse:detail:kitchencoffeemachine",
+        "name": "Library kitchencoffeemachine",
+        "kind": "glb",
+        "assetId": "warehouse-detail:kitchencoffeemachine",
+        "position": [
+          3.9,
+          4.03,
+          -75.25
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:kitchencoffeemachine",
+        "name": "Library kitchencoffeemachine",
+        "kind": "glb",
+        "assetId": "warehouse-detail:kitchencoffeemachine",
+        "position": [
+          4.125,
+          3.95,
+          -75.32174333878152
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          1.8465758437093345,
+          1.8465758437093345,
+          1.8465758437093345
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:kitchenblender",
+      "before": {
+        "id": "warehouse:detail:kitchenblender",
+        "name": "Library kitchenblender",
+        "kind": "glb",
+        "assetId": "warehouse-detail:kitchenblender",
+        "position": [
+          7.7,
+          4.03,
+          -75.25
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:kitchenblender",
+        "name": "Library kitchenblender",
+        "kind": "glb",
+        "assetId": "warehouse-detail:kitchenblender",
+        "position": [
+          7.79,
+          3.95,
+          -75.17230335789
+        ],
+        "rotation": [
+          0,
+          3.141592653589793,
+          0
+        ],
+        "scale": [
+          1.3252233289839905,
+          1.3252233289839905,
+          1.3252233289839905
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:lantern",
+      "before": {
+        "id": "warehouse:detail:lantern",
+        "name": "Scanned wooden lantern on lounge console",
+        "kind": "glb",
+        "assetId": "warehouse-detail:wooden_lantern_01",
+        "position": [
+          -12.4,
+          3.7,
+          -75.4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.8,
+          0.8,
+          0.8
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:lantern",
+        "name": "Scanned wooden lantern on lounge console",
+        "kind": "glb",
+        "assetId": "warehouse-detail:wooden_lantern_01",
+        "position": [
+          -12.4,
+          3.70832,
+          -75.4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.8,
+          0.8,
+          0.8
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:cutting-board",
+      "before": {
+        "id": "warehouse:detail:cutting-board",
+        "name": "Scanned wooden kitchen cutting board",
+        "kind": "glb",
+        "assetId": "warehouse-detail:wooden_cutting_board",
+        "position": [
+          4.65,
+          4.035,
+          -74.9
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.15,
+          1.15,
+          1.15
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:cutting-board",
+        "name": "Scanned wooden kitchen cutting board",
+        "kind": "glb",
+        "assetId": "warehouse-detail:wooden_cutting_board",
+        "position": [
+          4.65,
+          3.949885,
+          -74.9
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.15,
+          1.15,
+          1.15
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    },
+    {
+      "id": "warehouse:detail:knife",
+      "before": {
+        "id": "warehouse:detail:knife",
+        "name": "Scanned kitchen knife resting on cutting board",
+        "kind": "glb",
+        "assetId": "warehouse-detail:fish_knife",
+        "position": [
+          4.65,
+          4.065,
+          -74.9
+        ],
+        "rotation": [
+          0,
+          0.35,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      },
+      "after": {
+        "id": "warehouse:detail:knife",
+        "name": "Scanned kitchen knife resting on cutting board",
+        "kind": "glb",
+        "assetId": "warehouse-detail:fish_knife",
+        "position": [
+          4.65,
+          4.10768,
+          -74.9
+        ],
+        "rotation": [
+          0,
+          0.35,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "color": "#ffffff",
+        "visible": true,
+        "collision": "none"
+      }
+    }
+  ]
+}

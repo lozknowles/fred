@@ -21,50 +21,50 @@
       "welcome/1"
     ]
   },
-  "snapshot": "eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db",
+  "snapshot": "9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4",
   "components": {
     "metadata": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/metadata.json",
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/metadata.json",
       "sha256": "f491b9c5c56953f258d3512fc8c7bac171f113379a96ab250b5819380689df53",
       "bytes": 530
     },
     "terrain": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/terrain.json",
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/terrain.json",
       "sha256": "e829523b8c30a0e90801e37e5de0beaad4e75bb07b1006c40e4780e7947d72ad",
       "bytes": 2018773
     },
     "objects": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/objects.json",
-      "sha256": "f0e9261d54ab633b510eb68d80162d1ec626e04062b8c16c6ce9d7127271b473",
-      "bytes": 677265
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/objects.json",
+      "sha256": "800b586033e279790334df5a62de61393ab97f18010afb3f148cea62d8986057",
+      "bytes": 677516
     },
     "features": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/features.json",
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/features.json",
       "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
       "bytes": 3
     },
     "environment": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/environment.json",
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/environment.json",
       "sha256": "5a88285e1c8d43d5d807d8d837cb63ff61be3930ad35014330b55d55a548a58f",
       "bytes": 200
     },
     "spawn": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/spawn.json",
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/spawn.json",
       "sha256": "8409c9273ea815e204ede2873c6918c0b7ecc3e9c2bee1323138fc00890c4d80",
       "bytes": 59
     },
     "geography": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/geography.json",
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/geography.json",
       "sha256": "f1458c60dfd49fdb5f41ed852e5627e02445867a5a505e5863982b37ac6d7902",
       "bytes": 50
     },
     "assets": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/assets.json",
-      "sha256": "8f128b6fec5a505930b226d8e1d2a89c4602c77f00520156c45b283302f9cf2c",
-      "bytes": 74299
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/assets.json",
+      "sha256": "3c0c44ff309bd7f15f9990eaf8b7c08c8416ae542d38d875624f5d04fdb37d4f",
+      "bytes": 74465
     },
     "connections": {
-      "path": "snapshots/eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db/connections.json",
+      "path": "snapshots/9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4/connections.json",
       "sha256": "65f2f20ceca0959a7f432abc4b484d5b12bc7f566030965439d745b23c814f68",
       "bytes": 1286091
     }
@@ -80,7 +80,7 @@
       "regionId": "elsemesh.region:3c498d61-7d1f-478a-8a85-d9e66d3b63fb",
       "name": "Loz's Warehouse Island",
       "scene": {
-        "snapshot": "eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db"
+        "snapshot": "9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4"
       }
     }
   ],

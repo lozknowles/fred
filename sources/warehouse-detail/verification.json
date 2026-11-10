@@ -1,10 +1,10 @@
 {
   "schema": "warehouse-library-detail-verification/1",
   "worldId": "elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319",
-  "snapshot": "eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db",
+  "snapshot": "9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4",
   "assets": 11,
   "triangles": 47903,
-  "sourcePrimitives": 32,
+  "sourcePrimitives": 27,
   "addedVisualObjects": 11,
   "retiredVisualRecords": 34,
   "collisionBoxesUnchanged": 116,

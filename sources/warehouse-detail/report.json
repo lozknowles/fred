@@ -1,23 +1,23 @@
 {
   "baseSnapshot": "bde9512c66afdb280ff1e0f9177a68d3d0655a474e35547626503db0ec72e191",
-  "snapshot": "eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db",
-  "contentDigest": "064a7c3dc09ef745ba07fe6fde9916ca2514c450f6958b66c2517602a168d347",
+  "snapshot": "9329b9761954866f2d6020e29b05a202dcf334d8ba5210edc700f78832d980d4",
+  "contentDigest": "bd165d71b50a287dcc8413aeed628dc3d49e10817c2712cb603e6b09002f8970",
   "assets": [
     {
       "id": "warehouse-detail:chaise",
-      "path": "assets/d177ce2fd63043e575e4bb723afb99970b3f77cc2b774b639438e07b2ba0037b.glb",
-      "sha256": "d177ce2fd63043e575e4bb723afb99970b3f77cc2b774b639438e07b2ba0037b",
-      "bytes": 868996,
+      "path": "assets/90960fa8e8954c337c0acc959590c91bcfcc557439dd5f3699990c3afa536439.glb",
+      "sha256": "90960fa8e8954c337c0acc959590c91bcfcc557439dd5f3699990c3afa536439",
+      "bytes": 1020196,
       "triangles": 25128,
-      "primitives": 9
+      "primitives": 5
     },
     {
       "id": "warehouse-detail:ottoman",
-      "path": "assets/a83625f6d5ed0e2e8c03b55556ed74a4de22db3cfc703e3b386df23a63b0fa71.glb",
-      "sha256": "a83625f6d5ed0e2e8c03b55556ed74a4de22db3cfc703e3b386df23a63b0fa71",
-      "bytes": 372840,
+      "path": "assets/39893b0b74c59061f9172d8fb2d264f919952ecb4241693c28b4e676993e38de.glb",
+      "sha256": "39893b0b74c59061f9172d8fb2d264f919952ecb4241693c28b4e676993e38de",
+      "bytes": 421040,
       "triangles": 7824,
-      "primitives": 3
+      "primitives": 2
     },
     {
       "id": "warehouse-detail:wooden_cutting_board",
@@ -1025,7 +1025,7 @@
       ],
       "rotation": [
         0,
-        0,
+        3.141592653589793,
         0
       ],
       "scale": [
@@ -1068,7 +1068,7 @@
       "assetId": "warehouse-detail:wooden_cutting_board",
       "position": [
         4.65,
-        4.035,
+        3.949885,
         -74.9
       ],
       "rotation": [
@@ -1092,7 +1092,7 @@
       "assetId": "warehouse-detail:fish_knife",
       "position": [
         4.65,
-        4.065,
+        4.10768,
         -74.9
       ],
       "rotation": [
@@ -1116,7 +1116,7 @@
       "assetId": "warehouse-detail:wooden_lantern_01",
       "position": [
         -12.4,
-        3.7,
+        3.70832,
         -75.4
       ],
       "rotation": [
@@ -1187,19 +1187,19 @@
       "kind": "glb",
       "assetId": "warehouse-detail:kitchenstove",
       "position": [
-        7.739999999999999,
+        9.16,
         3.34,
-        -72.34
+        -72.54
       ],
       "rotation": [
         0,
-        0,
+        3.141592653589793,
         0
       ],
       "scale": [
         3.302325581395349,
         3.3777777777777778,
-        0.39999999999999997
+        1.511111111111111
       ],
       "color": "#ffffff",
       "visible": true,
@@ -1211,19 +1211,19 @@
       "kind": "glb",
       "assetId": "warehouse-detail:toaster",
       "position": [
-        2.2,
-        4.02,
-        -74.9
+        2.3,
+        3.95,
+        -75.1
       ],
       "rotation": [
         0,
-        0,
+        3.141592653589793,
         0
       ],
       "scale": [
-        1,
-        1,
-        1
+        1.5958827077278066,
+        1.5958827077278066,
+        1.5958827077278066
       ],
       "color": "#ffffff",
       "visible": true,
@@ -1235,19 +1235,19 @@
       "kind": "glb",
       "assetId": "warehouse-detail:kitchencoffeemachine",
       "position": [
-        3.9,
-        4.03,
-        -75.25
+        4.125,
+        3.95,
+        -75.32174333878152
       ],
       "rotation": [
         0,
-        0,
+        3.141592653589793,
         0
       ],
       "scale": [
-        1,
-        1,
-        1
+        1.8465758437093345,
+        1.8465758437093345,
+        1.8465758437093345
       ],
       "color": "#ffffff",
       "visible": true,
@@ -1259,19 +1259,19 @@
       "kind": "glb",
       "assetId": "warehouse-detail:kitchenblender",
       "position": [
-        7.7,
-        4.03,
-        -75.25
+        7.79,
+        3.95,
+        -75.17230335789
       ],
       "rotation": [
         0,
-        0,
+        3.141592653589793,
         0
       ],
       "scale": [
-        1,
-        1,
-        1
+        1.3252233289839905,
+        1.3252233289839905,
+        1.3252233289839905
       ],
       "color": "#ffffff",
       "visible": true,

@@ -1,6 +1,6 @@
 # Fred · Loz's Warehouse Island
 
-The private `fred/detail-world` candidate includes the actual locally retained CC0 BlenderKit chaise and matching ottoman, five Poly Haven scanned props, and four Kenney appliances. The former long-sofa and oven visual assemblies are retired; the sofa collision footprint, all 116 original collision boxes, original object IDs, screen/terminal interactions, spawn and portal records are retained. Reproduction, per-asset source hashes/licences and the measured 47,903 source triangles / 32 source primitives are in `sources/warehouse-detail/`. Browser/device visual and 25 FPS acceptance remain separate release gates.
+The private `fred/detail-world` candidate includes the actual locally retained CC0 BlenderKit chaise and matching ottoman, five Poly Haven scanned props, and four Kenney appliances. The former long-sofa and oven visual assemblies are retired; the sofa collision footprint, all 116 original collision boxes, original object IDs, screen/terminal interactions, spawn and portal records are retained. Reproduction, per-asset source hashes/licences and the measured 47,903 source triangles / 27 source primitives are in `sources/warehouse-detail/`. Browser/device visual and 25 FPS acceptance remain separate release gates.
 
 Private authored world for Fred. It shares a permanent world identity with the archived public Warehouse snapshot. The playable game pins an immutable content revision; this repository contains no owner credentials or runtime session state.
 
