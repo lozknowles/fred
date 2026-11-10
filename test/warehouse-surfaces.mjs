@@ -84,3 +84,13 @@ test('authored steel/rust scratches use no textures or batching split and retain
  }
  surfaces.dispose();geometry.dispose();
 });
+test('furniture detail follows the verified prefab and its original top material', async () => {
+ const {warehouseFurnitureSurface,WAREHOUSE_SURFACE_WORLD} = await import('../src/world-runtime/WarehouseSurfaces.js');
+ const bytes = new Uint8Array([1]);
+ const known = async () => 'e63413a44817d9c1b56720a000f8aa9a1a023e24a109b3e87df7a301c63e14f0';
+ const id = 'warehouse-prefab:small-nesting-table';
+ const spec = await warehouseFurnitureSurface(WAREHOUSE_SURFACE_WORLD, id, bytes, known);
+ assert.equal(spec.material, 'concreteDark');
+ assert.equal(await warehouseFurnitureSurface(WAREHOUSE_SURFACE_WORLD,id,bytes,async () => 'changed'), null);
+ assert.equal(await warehouseFurnitureSurface('other',id,bytes,known), null);
+});

@@ -13,6 +13,9 @@ import {isQualifiedFirstTripPackage} from './WebGLRepositoryPrograms.js';
 import {renderWebGLOpaqueDepthPrepass,createQualifiedWarehouseDepthOccluderProvider} from './WebGLOpaqueDepthPrepass.js';
 import { repositoryWeatherShelters, setMistShelters } from './WeatherShelter.js';
 import {primeWebGLWeatherShelter} from './WebGLWeatherShelter.js';
+import {installDefenderCabinet} from './DefenderCabinet.js';
+import {DefenderPlayer} from './DefenderPlayer.js';
+import {installWarehouseSnooker} from './WarehouseSnooker.js';
 import {MediaScreen,collectMediaScreenOccluders,mediaScreenCellVisibility} from './MediaScreen.js';
 import {RepositoryPortalSky} from './RepositoryPortalSky.js';
 import {readOpeningWorld,loadOpeningWorld,validateOpeningWorld} from './OpeningWorld.js';
@@ -88,7 +91,7 @@ async function init(){
  const ownerMode=()=>portals.config?.protocol==='elsemesh.owner-runtime/1';
  const interactionState=()=>({active:host.active,hostGeneration:host.generation,inputEnabled:input.enabled,transport:portals.transport,connection:portals.transport.connectionEpoch,sessionId:portals.transport.membership?.sessionId,generation:portals.transport.generation});
  const canResume=()=>canResumeObjectInteraction(interactionContext,{active:host.active,hostGeneration:host.generation,pending:portals.pending,authorityOffline:portals.authorityOffline,transport:portals.transport,connected:portals.connected,ownerMode:ownerMode()});
- const retro=new RepositoryRetro(input,{canResume,canExecute:()=>!ownerMode()||!!objectAccess?.valid(activeComputerId),canCommand:async()=>{if(!ownerMode())return true;if(!objectAccess?.valid(activeComputerId)){objectAccess?.invalidate();return false;}try{await objectAccess.use(activeComputerId);return true;}catch(error){report(error.message);return false;}}});
+ const retro=new RepositoryRetro(input,{canResume,canUsePeriodGuest:()=>!ownerMode(),canExecute:()=>!ownerMode()||!!objectAccess?.valid(activeComputerId),canCommand:async()=>{if(!ownerMode())return true;if(!objectAccess?.valid(activeComputerId)){objectAccess?.invalidate();return false;}try{await objectAccess.use(activeComputerId);return true;}catch(error){report(error.message);return false;}}});
  let publicDuck=null,movementPortals=null;
  let refraction,atmosphere,sky,clouds,environment,shadows,weather,renderer,medium,post,backendHost={},backendPortals={};
  if(isWebGL){
@@ -96,7 +99,13 @@ async function init(){
   const {WebGLPortalViews}=await import('./WebGLPortalViews.js');
   configureWebGLRepositoryScene(engine.scene);
   engine.repositoryReadinessSignature=webGLRepositoryReadinessSignature;engine.prepareRepositoryResources=root=>prepareWebGLRepositoryResources({renderer:engine.renderer,camera:engine.camera,root,targetScene:engine.scene,signal:engine.resourcePreparationSignal});
-  const buildGL=async(descriptor,camera,{loaded}={})=>{const candidate=await buildWebGLRepositoryScene(descriptor,camera,repositorySceneOptions(descriptor.project,loaded,{renderer:engine.renderer,backend:'webgl2',camera:engine.camera}));try{installNeonShiftWorld(candidate,loaded);if(candidate.splatScene){candidate.terrain=withSplatMovementBoundary(candidate.splatScene.physics,{requireOwnerConfirmation:()=>movementPortals?.config?.protocol==='elsemesh.owner-runtime/1',getConfirmedPose:()=>confirmedSplatPose(movementPortals,candidate,{contentDigest:loaded?.identity?.contentDigest})});const warm=camera.clone();warm.position.fromArray(descriptor.project.spawn.position);warm.position.y+=1.62;warm.rotation.set(candidate.splatScene.physics.qualification.spawn.pitch??0,descriptor.project.spawn.yaw,0,'YXZ');warm.updateMatrixWorld(true);await candidate.splatScene.prepareResources(warm);}await publicDuck?.install(candidate);
+  const buildGL=async(descriptor,camera,{loaded}={})=>{const candidate=await buildWebGLRepositoryScene(descriptor,camera,repositorySceneOptions(descriptor.project,loaded,{renderer:engine.renderer,backend:'webgl2',camera:engine.camera}));try{
+   if(loaded?.identity?.contentDigest==='5933d445246a3ee4c2a0c79a0e9e42630b6bec89db48c9ad32318f56f8976172'){
+    const cabinet=installDefenderCabinet(candidate);
+    if(cabinet)candidate.defenderPlayer=new DefenderPlayer(cabinet);
+    installWarehouseSnooker(candidate);
+   }
+   installNeonShiftWorld(candidate,loaded);if(candidate.splatScene){candidate.terrain=withSplatMovementBoundary(candidate.splatScene.physics,{requireOwnerConfirmation:()=>movementPortals?.config?.protocol==='elsemesh.owner-runtime/1',getConfirmedPose:()=>confirmedSplatPose(movementPortals,candidate,{contentDigest:loaded?.identity?.contentDigest})});const warm=camera.clone();warm.position.fromArray(descriptor.project.spawn.position);warm.position.y+=1.62;warm.rotation.set(candidate.splatScene.physics.qualification.spawn.pitch??0,descriptor.project.spawn.yaw,0,'YXZ');warm.updateMatrixWorld(true);await candidate.splatScene.prepareResources(warm);}await publicDuck?.install(candidate);
    if(!candidate.splatScene && isQualifiedFirstTripPackage(installation.kind,loaded?.identity)){
     candidate.root.userData.repositoryActualPassPreparation=true;
     primeWebGLWeatherShelter(engine,candidate.root);
@@ -144,6 +153,7 @@ async function init(){
   const list=document.querySelector('#player-tips ul');if(list){list.replaceChildren();for(const tip of [
    'WASD to walk, Space to jump and Shift to run. On a phone or tablet, use the movement, look, jump and Use controls.',
    'Drag the mouse or use arrow keys to look. Press V to switch between first-person and follow view.',
+   'In follow view, stand still and press G to turn to the camera and give a thumbs-up. Moving returns to normal.',
    'Press M or tap Menu to change screen resolution, portal quality and the current world time.',
    'Find the gold Table Tennis Room doorway beside the Dock portal in the warehouse. Move around it to see the room, then walk through when its view is ready.',
    'In the Table Tennis Room, walk within the room boundaries and around the table. Return through the same gold doorway.',
@@ -166,7 +176,7 @@ async function init(){
    if(ownerMode()){if(!objectAccess.snapshot)await objectAccess.read();await objectAccess.use(computer.id);}
    if(host.active!==active||portals.pending||portals.authorityOffline)return;
    activeComputerId=computer.id;interactionContext=interactionState();
-   const retroDevice=device??active.project.terminals?.find(t=>t.objectId===computer.id&&['c64','sun'].includes(t.kind));
+   const retroDevice=device??active.project.terminals?.find(t=>t.objectId===computer.id&&['c64','bbc','sun'].includes(t.kind));
    if(retroDevice&&retro.open(retroDevice))return;
    input._clearTransientInput();document.exitPointerLock?.();document.querySelector('#computer-info').textContent='Computer '+computer.id+' · '+(ownerMode()?'Owner session':installation.kind==='published'?'Single player':'Local preview')+' · sign '+(computer.computer.targetSignId??'not assigned');
    document.querySelector('#computer-controls').textContent='';terminal.showModal();window.dispatchEvent(new CustomEvent('repository-computer',{detail:{computer,active}}));
@@ -203,11 +213,13 @@ async function init(){
  worldWelcome=new WorldWelcomeController({getContext:()=>{const t=portals.transport,a=host.active,owner=ownerMode();return {active:a,transport:t,connection:t.connectionEpoch,worldId:a?.identity.worldId,contentDigest:a?.identity.contentDigest,sessionId:t.membership?.sessionId,generation:t.generation,authorityEpoch:t.membership?.world?.epoch,playerNodeId:t.identity?.nodeId,ownerMode:owner,visible:document.visibilityState!=='hidden',ready:!!a&&!portals.pending&&!portals.authorityOffline&&(!owner||(portals.connected&&!t.closed&&!t.frozen&&t.worldId===a.identity.worldId))};},present:welcome=>!document.querySelector('dialog[open]')&&welcomeView.show(welcome),clear:()=>welcomeView.hide(),speech:welcomeSpeech});
  app.worldWelcome=worldWelcome;
  const avatarChooser=new AvatarChooser({app});app.avatarChooser=avatarChooser;
- window.addEventListener('keydown',event=>{if(event.code==='KeyK'&&!graphics?.open&&!retro.active&&!terminal.open&&!media?.controlsOpen&&!portals.pending)avatarChooser.show();});
+ window.addEventListener('keydown',event=>{if(event.code==='KeyK'&&!atSnooker()&&!graphics?.open&&!retro.active&&!terminal.open&&!media?.controlsOpen&&!portals.pending)avatarChooser.show();});
  const followButton=document.querySelector('#follow-player');const setFollow=enabled=>{if(enabled)alignAvatarToPlayerView(avatar,host.active?.player);followCamera.setEnabled(enabled);followButton.textContent=enabled?'First-person view · V':'Follow player · V';post?.taau.resetHistory();engine.canvas.focus();};followButton.onclick=()=>setFollow(!followCamera.enabled);followButton.textContent=followCamera.enabled?'First-person view · V':'Follow player · V';
- const canToggleView=()=>input.enabled&&!retro.active&&!terminal.open&&!media?.controlsOpen&&!avatarChooser.dialog.open&&!portals.pending&&!portals.authorityOffline;
+ const atSnooker=()=>!!host.active?.snooker?.active;
+ const canToggleView=()=>!atSnooker()&&input.enabled&&!retro.active&&!terminal.open&&!media?.controlsOpen&&!avatarChooser.dialog.open&&!portals.pending&&!portals.authorityOffline;
  window.addEventListener('keydown',event=>{if(event.code==='KeyV'&&canToggleView())setFollow(!followCamera.enabled);});
  const touchGameplayReady=()=>!!host.active&&input.enabled&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!portals.pending&&!portals.authorityOffline&&!avatarChooser.dialog.open&&!app.freeCam&&!playerEyes?.panel.open&&!document.querySelector('dialog[open]');
+ window.addEventListener('keydown',event=>{if(event.code!=='KeyG'||event.repeat||event.ctrlKey||event.altKey||event.metaKey||event.target?.closest?.('input,textarea,select,[contenteditable="true"]')||!followCamera.enabled||!touchGameplayReady()||graphics?.open||playerEyes?.controller.status().active)return;if(avatar.thumbsUp?.(host.active.player))event.preventDefault();});
  window.addEventListener('keydown',event=>{if(canSpeakAvatarKey(event,touchGameplayReady()&&!graphics?.open)){event.preventDefault();void avatarChooser.speakVoice();}});
  input.bindTouchAction(document.querySelector('#touch-use'),{code:'KeyE',allowed:touchGameplayReady});
  input.bindTouchAction(document.querySelector('#touch-jump'),{code:'Space',hold:true,allowed:touchGameplayReady});
@@ -216,7 +228,7 @@ async function init(){
  window.__repositoryWorldApp=app;
  if(isWebGL){
   const [{PlayerEyeView},{PlayerEyeControls},{PlayerEyePanel},{RepositoryPlayerEyes},{WebGLPlayerEyeRenderer}]=await Promise.all([import('./PlayerEyeView.js'),import('./PlayerEyeControls.js'),import('./PlayerEyePanel.js'),import('./RepositoryPlayerEyes.js'),import('./WebGLPlayerEyeRenderer.js')]);
-  const uiClear=()=>!graphics?.open&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!avatarChooser.dialog.open&&!playerEyes?.panel.open;
+  const uiClear=()=>!atSnooker()&&!graphics?.open&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!avatarChooser.dialog.open&&!playerEyes?.panel.open;
   const safeSession=()=>!engine.renderer.getContext?.()?.isContextLost?.()&&!!host.active&&host.active.player.mode==='walk'&&portals.connected&&!portals.pending&&!portals.authorityOffline&&!portals.transport.closed&&!portals.transport.frozen&&portals.transport.worldId===host.active.identity.worldId&&uiClear();
   const sameViewer=()=>!eyeInputContext||(eyeInputContext.active===host.active&&eyeInputContext.hostGeneration===host.generation&&eyeInputContext.transport===portals.transport&&eyeInputContext.connection===portals.transport.connectionEpoch&&eyeInputContext.sessionId===portals.transport.membership?.sessionId&&eyeInputContext.generation===portals.transport.generation);
   const roster=new RepositoryPlayerEyes({runtime:portals,timeoutMs:3000,allowCrossWorld:allowCrossWorldEyes});
@@ -233,11 +245,11 @@ async function init(){
  }
 
  let graphicsInputContext=null;
- graphics=new GraphicsPanel({app,captureQuality,canOpen:()=>!!host.active&&!portals.pending&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!avatarChooser.dialog.open&&!playerEyes?.panel.open,
+ graphics=new GraphicsPanel({app,captureQuality,canOpen:()=>!atSnooker()&&!!host.active&&!portals.pending&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!avatarChooser.dialog.open&&!playerEyes?.panel.open,
   onOpen:()=>{playerEyes?.ownView('Graphics menu opened');graphicsInputContext=interactionState();input.suspend();},
   onClose:()=>{resumeUI(graphicsInputContext);graphicsInputContext=null;}});app.graphics=graphics;
  const sessionStatus=document.querySelector('#session-status');
- host.beforeActivate=async()=>{frameDiagnostics.read();graphics?.worldChanging();playerEyes?.panel.setOpen(false);playerEyes?.ownView('Viewer world is changing');media?.exit();worldWelcome?.reset();objectAccess.invalidate();controlsHelp.close();accessPanel.root.open=false;accessPanel.render(null);if(retro.active)retro.clear();document.querySelector('#apply-update').disabled=true;document.querySelector('#update-status').textContent='';app.session?.disconnect();if(terminal.open)terminal.close();};
+ host.beforeActivate=async()=>{host.active?.defenderPlayer?.pause();host.active?.snooker?.leave();frameDiagnostics.read();graphics?.worldChanging();playerEyes?.panel.setOpen(false);playerEyes?.ownView('Viewer world is changing');media?.exit();worldWelcome?.reset();objectAccess.invalidate();controlsHelp.close();accessPanel.root.open=false;accessPanel.render(null);if(retro.active)retro.clear();document.querySelector('#apply-update').disabled=true;document.querySelector('#update-status').textContent='';app.session?.disconnect();if(terminal.open)terminal.close();};
  const makeSession=()=>new RepositorySession(host,{trustedOwners:new Set([document.querySelector('#session-url').value.trim()]),onStatus:value=>sessionStatus.textContent=value});
  document.querySelector('#session-identity').onclick=()=>void(async()=>{const session=app.session??makeSession();document.querySelector('#public-identity').textContent=JSON.stringify(await session.publicIdentity(),null,2);})().catch(error=>sessionStatus.textContent=error.message);
  document.querySelector('#session-connect').onclick=()=>void(async()=>{const file=document.querySelector('#admission').files[0];if(!file||file.size>100000)throw Error('Select an operator admission JSON under 100 KB.');const proof=JSON.parse(await file.text());if(portals.mode==='published')portals.disconnect();app.session?.disconnect();app.session=makeSession();await app.session.connect(proof);})().catch(error=>sessionStatus.textContent=error.message);
@@ -269,17 +281,33 @@ async function init(){
    const touchActive=input.touchInterface&&touchGameplayReady();
    if(touchWasActive&&!touchActive)input._clearTransientInput();
    touchWasActive=touchActive;if(touchLayer)touchLayer.hidden=!touchActive;
-   const canMove=!graphics.open&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!portals.pending&&!portals.authorityOffline&&!app.freeCam&&!playerEyes?.panel.open;
+   const canMove=!atSnooker()&&!graphics.open&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!portals.pending&&!portals.authorityOffline&&!app.freeCam&&!playerEyes?.panel.open;
    if(playerEyes?.controller.status().active&&!playerEyes.controls.maintain())playerEyes.ownView('Viewer session changed');
    let eyeActive=!!playerEyes?.controller.status().active,eyeFrame=eyeActive?playerEyes.controller.update():null;eyeActive=!!eyeFrame;
+   if(!canMove||!input.enabled||eyeActive||!followCamera.enabled||document.querySelector('dialog[open]'))avatar.cancelGesture?.();
    const env=graphics.environment(host.environment()??{timeOfDay:14,cloudCoverage:.49,windSpeed:6,sunAzimuth:0});
     if(eyeActive||!app.freeCam)host.update(dt,time,{move:eyeActive||canMove,interact:!eyeActive&&canMove,environment:env,viewCamera:eyeFrame&&eyeFrame.target.worldId===host.active?.identity.worldId?eyeFrame.camera:engine.camera});
-    if(canMove&&!eyeActive&&input.hit('KeyE')){const device=retro.nearest(engine.camera.position),tv=nearestMedia();if(device){const computer=host.active.project.objects.find(o=>o.id===device.objectId);if(computer)void openComputer(computer,host.active,device);else if(!ownerMode()){interactionContext=interactionState();retro.open(device);}else report('Access restricted');}else if(tv)void openMedia(tv,host.active);}
+    if(canMove&&!eyeActive&&input.hit('KeyE')){const device=retro.nearest(engine.camera.position),tv=nearestMedia();if(device){const computer=host.active.project.objects.find(o=>o.id===device.objectId);if(computer)void openComputer(computer,host.active,device);else if(!ownerMode()){interactionContext=interactionState();retro.open(device);}else report('Access restricted');}else if(tv)void openMedia(tv,host.active);
+     else if(!ownerMode()&&host.active?.defenderCabinet?.near(host.active.player.position))host.active.defenderPlayer.cabinetAction();
+     else if(!ownerMode()&&host.active?.snooker?.near(host.active.player.position)){
+      const table=host.active.snooker,context=interactionState();
+      if(table.enter({onLeave:()=>{resumeUI(context);engine.canvas.focus();}})){input.suspend();host.active.defenderPlayer?.playAtTable();}
+     }
+    }
    // Opening a control panel can follow the player's first-person camera update
    // in the same frame. Keep the chosen follow view while movement is suspended.
    if(host.active&&!app.freeCam)followCamera.update(dt,host.active,{suspended:eyeActive||portals.pending});
+   if(followCamera.enabled&&!eyeActive&&!app.freeCam)avatar.frameGestureCamera?.(engine.camera,host.active,followCamera);
+   if(host.active?.snooker){
+    const table=host.active.snooker,eligible=!ownerMode()&&!eyeActive&&!portals.pending&&!app.freeCam&&!terminal.open&&!retro.active;
+    table.update(dt,{near:eligible&&table.near(host.active.player.position),window});
+    if(table.active){if(eligible)table.frameCamera(engine.camera);else table.leave();}
+   }
+   if(host.active?.defenderPlayer){
+    host.active.defenderPlayer.update(engine.camera.position,{enabled:!ownerMode()&&!eyeActive&&!portals.pending&&!app.freeCam&&!terminal.open&&!retro.active&&document.visibilityState==='visible'});
+   }
    if(host.active)avatar.update(dt,host.active.player,engine.camera,app.freeCam||followCamera.enabled||eyeActive);else avatar.group.visible=false;
-   portals.update(dt,time,{allowCrossing:!eyeActive,viewCamera:eyeFrame?.camera??engine.camera,viewWorldId:eyeFrame?.target.worldId??host.active?.identity.worldId});publicDuck?.update(dt);if(eyeActive){eyeFrame=playerEyes.controller.update();eyeActive=!!eyeFrame;}if(playerEyes&&performance.now()>=(playerEyes.nextPanelAt??0)){playerEyes.panel.refresh();playerEyes.nextPanelAt=performance.now()+250;}arrivals.update();portalEffects.update(dt,time);input.endFrame();
+   portals.update(dt,time,{allowCrossing:!eyeActive&&!atSnooker(),viewCamera:eyeFrame?.camera??engine.camera,viewWorldId:eyeFrame?.target.worldId??host.active?.identity.worldId});publicDuck?.update(dt);if(eyeActive){eyeFrame=playerEyes.controller.update();eyeActive=!!eyeFrame;}if(playerEyes&&performance.now()>=(playerEyes.nextPanelAt??0)){playerEyes.panel.refresh();playerEyes.nextPanelAt=performance.now()+250;}arrivals.update();portalEffects.update(dt,time);input.endFrame();
    let weatherState;const water=host.active?.project.water;
    if(isWebGL){weatherState=updateWebGLRepositoryEnvironment(engine,host.active,time,env);renderer.toneMapping=host.active?.splatScene?.expectedToneMapping??backendPortals.views.ordinaryToneMapping;let eyeDrawn=false;if(eyeFrame){eyeFrame.camera.aspect=engine.width/engine.height;eyeFrame.camera.updateProjectionMatrix();try{eyeDrawn=playerEyes.renderer.render(eyeFrame,{width:engine.width,height:engine.height,time});}catch(error){playerEyes.lastError=String(error?.message??error);playerEyes.ownView('Player eye rendering unavailable');report('Player eyes unavailable: '+playerEyes.lastError);}if(eyeDrawn)playerEyes.drawnFrames++;else playerEyes.ownView('Player scene authorization changed');}if(!eyeDrawn){portals.render({width:engine.width,height:engine.height,time});host.active?.nativeIsland?.bindView(engine.camera);renderMainScene();}publicMeld?.afterFrame({active:host.active,generation:host.generation,eligible:portals.enabled&&portals.mode==='published'&&!ownerMode()&&host.active?.player.mode==='walk'&&!eyeFrame&&!app.freeCam&&!media?.active&&!media?.controlsOpen&&!terminal.open&&!retro.active&&!graphics.open&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!playerEyes?.panel.open&&!document.querySelector('dialog[open]')});}
    else{const shelters=repositoryWeatherShelters(host.active?.project);setMistShelters(medium.uniforms,shelters);clouds.coverage.value=env.cloudCoverage??.49;G.windSpeed.value=env.windSpeed??6;
@@ -295,7 +323,7 @@ async function init(){
    media.update();worldWelcome.tick();
    if(openingLoading&&pendingOpeningReady&&pendingOpeningReady===host.active){const activeOpeningFrame=host.active;openingProgress.advance('first-frame');pendingOpeningReady=null;openingLoading=false;requestAnimationFrame(()=>{if(host.active===activeOpeningFrame)hideOpeningSplash();});}
    const active=host.active;
-   const interaction=!active?'':retro.nearest(engine.camera.position)?' · E: use Commodore / retro computer':host.nearestComputer()?' · E: use computer':nearestMedia()?' · E: turn on or control TV (Play, then Return to game)':'';
+   const interaction=!active?'':retro.nearest(engine.camera.position)?' · E: use Commodore / retro computer':host.nearestComputer()?' · E: use computer':nearestMedia()?' · E: turn on or control TV (Play, then Return to game)':!ownerMode()&&active.defenderCabinet?.near(active.player.position)?' · E: play Defender / toggle sound':!ownerMode()&&active.snooker?.near(active.player.position)?' · E: take a snooker shot':'';
    const blocked=active?.player.mode==='walk'&&canMove&&!eyeActive&&!app.freeCam&&walkingBlockMessage(active.player.walkingBlock,active.project);
    updateRepositoryHud(hud,active,interaction,blocked);
    // Preserve frame-local inputs and eye status sampling; debug-only readers run on demand.

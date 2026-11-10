@@ -50,7 +50,7 @@ for(const relative of selected){
  if(!info.isFile()||info.isSymbolicLink())throw Error('World repository contains a non-file or link.');
  total+=info.size;if(total>120*1024*1024)throw Error('World repository exceeds the package byte limit.');
 }
-const buildFiles=['index.html','worlds.html','assets','clouds','textures/smaa','images/loz-warehouse-island.svg',...warehouseGraphicsFiles];
+const buildFiles=['media/defender/gameplay.mp4','media/defender/challenge.mp4','media/defender/title.jpg','media/defender/challenge.jpg','index.html','worlds.html','assets','clouds','textures/smaa','images/loz-warehouse-island.svg',...warehouseGraphicsFiles];
 const characterFiles=['stock-player.glb','stock-female.glb','stock-player-medium.glb','stock-player-low.glb','stock-female-medium.glb','stock-female-low.glb','avatar-male.png','avatar-female.png','LICENSE-Rocketbox.md'];
 for(const name of buildFiles)await fs.access(path.join(build,name));
 for(const name of characterFiles)await fs.access(path.join(build,'models/characters',name));
@@ -71,7 +71,7 @@ await fs.writeFile(path.join(output,'credits.html'),openingCredits.replaceAll('w
 const notices=[['LICENSE','LICENSE'],['src/world-runtime/vendor/THREE-LICENSE.txt','licenses/THREE-LICENSE.txt'],['src/world-runtime/vendor/FONT-LICENSE.txt','licenses/FONT-LICENSE.txt'],['src/world-runtime/vendor/ESBUILD-LICENSE.txt','licenses/ESBUILD-LICENSE.txt'],['src/vendor/basic-m6502/LICENSE','licenses/BASIC-M6502-LICENSE.txt']];
 for(const [from,to] of notices){const target=path.join(output,to);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(new URL('../'+from,import.meta.url),target);}
 await fs.writeFile(path.join(output,'opening-world.json'),JSON.stringify({...config,schema:'elsemesh.opening-world/2',bundlePath},null,2)+'\n');
-const localServerFiles=['tools/serve-opening-world.mjs','tools/local-avatar-voice.mjs','tools/local-ai-terminal.mjs','src/network/SpeechText.js'];
+const localServerFiles=['tools/serve-opening-world.mjs','tools/local-avatar-voice.mjs','tools/local-ai-terminal.mjs','tools/local-period-sun.mjs','tools/period-sun-worker.py','src/network/SpeechText.js'];
 for(const name of localServerFiles){const target=path.join(output,'.fred-server',name);await fs.mkdir(path.dirname(target),{recursive:true});await fs.copyFile(new URL('../'+name,import.meta.url),target);}
 await fs.writeFile(path.join(output,'.fred-server/package.json'),'{"type":"module"}\n');
 // Keep the small server dependency private; a saved build runs without npm setup.

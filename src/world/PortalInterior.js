@@ -5,7 +5,7 @@ import { generateMipmaps } from '../engine/gpu/Mipmaps.js';
 import { decodeImage } from '../engine/loaders/GLTF.js';
 import { buildRecipe } from './PortalInteriorRecipe.js';
 import { makeKeyboardLegendMaterial, makeRetroNameplateMaterial, makeRetroScreenMaterial } from './PortalRetroScreens.js';
-import { C64Computer } from './C64Computer.js';
+import { PeriodComputer } from '../world-runtime/PeriodComputer.js';
 
 const shapeGeometry = (shape, size) => {
   if (shape === 'cylinder') return new CylinderGeometry(size[0] * .5, size[0] * .5, size[1], 16);
@@ -89,7 +89,8 @@ export class PortalInterior {
     this.inside = false;
     this.cooldown = 0;
     this.returnState = null;
-    this.c64 = new C64Computer(app);
+    this.computers = new Map(['c64','bbc','sun'].map(kind=>[kind,new PeriodComputer(app,kind)]));
+    this.c64 = this.computers.get('c64');
   }
 
   async loadSurfaceTextures(){
@@ -221,7 +222,7 @@ export class PortalInterior {
     this.cooldown = Math.max(0, this.cooldown - dt);
     const p = this.app.player;
     if (!p) return;
-    if (this.c64.active) return;
+    if ([...this.computers.values()].some(computer=>computer.active)) return;
     if (!this.exteriorGroundResolved) {
       const ground = p.groundAt?.(100, 580, 30);
       if (Number.isFinite(ground)) {
@@ -234,10 +235,10 @@ export class PortalInterior {
     const exteriorY = p.groundAt(100, 580, 30);
     const nearOutside = !this.inside && Math.hypot(p.position.x - 100, p.position.z - 580) < 4.2 && (!Number.isFinite(exteriorY) || Math.abs(p.position.y - exteriorY) < 3);
     const nearInside = this.inside && Math.hypot(p.position.x - (this.origin.x - 4), p.position.z - this.origin.z) < 3.5;
-    const nearC64 = this.inside && Math.hypot(p.position.x - (this.origin.x - 11.5), p.position.z - (this.origin.z + 8.0)) < 1.9 && Math.abs(p.position.y - (this.origin.y + 4)) < 2;
-    if (nearC64) {
-      p.prompt = { key: 'E', text: 'Use Commodore 64' };
-      if (this.app.input.hit('KeyE')) { this.c64.open(); this.cooldown = .8; }
+    const device = this.inside && Math.abs(p.position.y - (this.origin.y + 4)) < 2 ? [[-11.5,'c64','Use Commodore 64'],[-8.5,'bbc','Use BBC Micro'],[-5.5,'sun','Use Sun SPARCstation']].map(([x,kind,label])=>({kind,label,d:Math.hypot(p.position.x-(this.origin.x+x),p.position.z-(this.origin.z+8.0))})).filter(t=>t.d<1.9).sort((a,b)=>a.d-b.d)[0] : null;
+    if (device) {
+      p.prompt = { key: 'E', text: device.label };
+      if (this.app.input.hit('KeyE')) { void this.computers.get(device.kind).open(); this.cooldown = .8; }
     } else if (nearOutside) {
       p.prompt = { key: 'E', text: 'Enter warehouse loft' };
       if (this.app.input.hit('KeyE')) { this.enter(); this.cooldown = .8; }

@@ -10,6 +10,21 @@ const specs={
  fabric:{family:'fabric',metres:1.15},charcoal:{family:'fabric',metres:1.15},rug:{family:'fabric',metres:1.15},rugLight:{family:'fabric',metres:1.15},rugStair:{family:'fabric',metres:1.15},
  steel:{family:'scratchedMetal',procedural:true},rust:{family:'scratchedMetal',procedural:true},
 };
+// In these authored prefabs slot zero is the seat or top. Slot one is hardware.
+const furnitureTops = new Map([
+ ['warehouse-prefab:dining-chair', ['883beed03be68ce90892f9e108fde50029b9d712bbe39a81561c4ebcc4e8154c', 'charcoal']],
+ ['warehouse-prefab:dining-table', ['82e4a0c60f5630e404c10af39c8708957857348650919e03508e2206df73f649', 'wood']],
+ ['warehouse-prefab:large-nesting-table', ['3f498c2af5379ace7a8e77fdcbceb93a527ac9bd6095a2cf3c1cca5682458f5e', 'wood']],
+ ['warehouse-prefab:small-nesting-table', ['e63413a44817d9c1b56720a000f8aa9a1a023e24a109b3e87df7a301c63e14f0', 'concreteDark']],
+ ['warehouse-prefab:side-table', ['3e8f0f308d98f84df31ae8344934e8e0b10b92f93f33b7c8759e939c51727d6c', 'wood']],
+ ['warehouse-prefab:mezzanine-side-table', ['d64736602ae0bf83349f4054924ced8441ba44b3b86fecd47ced88d0ef2af26e', 'charredWood']],
+]);
+
+export async function warehouseFurnitureSurface(worldId, assetId, bytes, digest) {
+ const recipe = worldId === WAREHOUSE_SURFACE_WORLD && furnitureTops.get(assetId);
+ if (!recipe || await digest(bytes) !== recipe[0]) return null;
+ return {...specs[recipe[1]], material: recipe[1]};
+}
 // Linear RGB means from deterministic 128x128 centre samples of the shipped
 // sRGB albedos (IEC 61966-2-1 transfer). These maps already contain material
 // colour: divide it out of the multiplier so the recipe colour remains the
