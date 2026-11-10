@@ -16,5 +16,16 @@ test('WebGL native scene batches exact records and gates arrival; diagnostics re
  const normal=new Uint8Array(n*n*4),splat=new Uint8Array(n*n*4);for(let i=0;i<n*n;i++){normal.set([128,128,0,255],i*4);splat.set([255,0,0,0],i*4);}const source={domain:{res:n,size:8,origin:-4},coarse:{res:n,heights:new Float32Array(n*n),normal,splat},grassMask:{res:n,data:new Uint8Array(n*n*4)},shore:{res:n,data:new Float32Array(n*n*4)},records,appearance:{swellDir:{x:0,y:-1}},ocean:{level:0,fft:{local:{windDirection:25}},shore:{period:9,amplitude:.34}},tiles:[{id:'fine',x:0,z:0,width:n,height:n,bounds:[-4,-4,4,4],minHeight:0,maxHeight:0}],readTile:async()=>({fields:{heights:new Float32Array(n*n),normal,splat}})};
  const bark=new T.DataTexture(new Uint8Array([128,128,255,255]),1,1),maps={palm:{map:bark,normalMap:bark,orm:bark},tree:{map:bark,normalMap:bark,orm:bark},dispose(){bark.dispose();}};
  const native=await buildWebGLNativeIsland({project:{environment:{windSpeed:7}},root,camera,options:{readNativeIsland:async()=>source,prepareLeafAtlas:async()=>new T.Texture(),prepareVegetationAssets:async()=>maps}});assert.ok(Number.isNaN(native.data.heightAt(0,0)));await native.ensureArrival([0,0,0]);assert.equal(native.data.heightAt(0,0),0);native.bindView(camera);const stats=native.stats();assert.equal(stats.plants.records,201);assert.ok(stats.plants.batches<=10);assert.ok(stats.plants.displayed>0);assert.equal(stats.backendQualification,'unqualified-optical-equivalence');assert.equal(WEBGL_NATIVE_ISLAND_QUALIFICATION.backend,'webgl2');
+ // Following the player must not pack the first-person vegetation list before
+ // the render pass selects the follow camera. Tile and wind updates still run.
+ const batches=[];root.traverse(node=>{if(node.userData.nativePlantSpecies)batches.push(node);});
+ const versions=batches.map(node=>node.instanceMatrix.version);
+ const follow=camera.clone();follow.position.x+=5;follow.updateMatrixWorld();
+ native.update(1/60,follow,false);
+ assert.deepEqual(batches.map(node=>node.instanceMatrix.version),versions);
+ native.bindView(follow);
+ assert.ok(batches.every((node,i)=>node.instanceMatrix.version>versions[i]));
+ const drawn=batches.map(node=>node.instanceMatrix.version);
+ native.bindView(follow);assert.deepEqual(batches.map(node=>node.instanceMatrix.version),drawn);
  root.traverse(node=>{if(!node.material?.onBeforeCompile)return;const shader={vertexShader:T.ShaderLib.standard.vertexShader,fragmentShader:T.ShaderLib.standard.fragmentShader,uniforms:{}};node.material.onBeforeCompile(shader);assert.ok(shader.vertexShader);assert.ok(shader.fragmentShader);});native.dispose();assert.equal(root.children.length,0);
 });

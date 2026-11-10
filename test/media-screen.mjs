@@ -325,6 +325,45 @@ for(const version of [1,2])test('renderer-owned WebGL palm shader '+version+' us
  plant.geometry.dispose();plant.material.dispose();
 });
 
+test('vegetation visibility survives identical camera uploads and updates on a single changed instance',()=>{
+ const f=fixture(),geometry=new T.BoxGeometry(1,1,1);
+ const plant=new T.InstancedBufferAttribute(new Float32Array([0,.3,15,1]),4);
+ const record=new T.InstancedBufferAttribute(new Float32Array([0,1,0,0]),4);
+ geometry.setAttribute('iPlant',plant);geometry.setAttribute('iRecord',record);
+ const material=new T.MeshStandardMaterial();
+ material.customProgramCacheKey=()=> 'native-source-plants-webgl/2:palm';
+ material.userData.nativeWindStrength=1;material.userData.nativeWindVector=new T.Vector2(1,0);
+ const mesh=new T.InstancedMesh(geometry,material,1);mesh.userData.mediaOcclusionPlant='native-palm-v1';
+ const near=new T.Matrix4().makeTranslation(6.5,3,-86),far=new T.Matrix4().makeTranslation(25,3,-110);
+ mesh.setMatrixAt(0,near);f.root.add(mesh);
+ const inspect=()=>collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'}).bounds;
+ const first=inspect();assert.equal(first.length,1);
+ // A portal draw repacks the same buffer in place, then the main camera restores it.
+ mesh.setMatrixAt(0,far);mesh.instanceMatrix.needsUpdate=true;
+ mesh.setMatrixAt(0,near);mesh.instanceMatrix.needsUpdate=true;plant.needsUpdate=true;record.needsUpdate=true;
+ assert.equal(inspect()[0],first[0]);
+ plant.setZ(0,16);plant.needsUpdate=true;const changed=inspect()[0];
+ assert.notEqual(changed,first[0]);assert.notDeepEqual(changed.max,first[0].max);
+ material.userData.nativeWindStrength=.4;assert.notEqual(inspect()[0],changed);
+ mesh.setMatrixAt(0,far);mesh.instanceMatrix.needsUpdate=true;assert.equal(inspect().length,0);
+ mesh.setMatrixAt(0,near);mesh.instanceMatrix.needsUpdate=true;assert.equal(inspect().length,1);
+ mesh.count=0;assert.equal(inspect().length,0);
+ mesh.count=1;mesh.position.x=40;assert.equal(inspect().length,0);
+ mesh.position.x=0;assert.equal(inspect().length,1);
+ geometry.dispose();material.dispose();
+});
+
+test('affine palm bounds match all eight transformed corners with negative scales and shear',()=>{
+ const local={min:[-1,-2,-3],max:[2,3,4],radius:6},matrix=new T.Matrix4().set(
+  -1.5,.25,.75,5, 2,-1,.1,-3, .3,.8,1.25,2, 0,0,0,1);
+ const opts={height:2,lean:.2,windStrength:1,windLength:.8};
+ const identity=webGLPalmOcclusionBounds(local,new T.Matrix4(),opts),expected=new T.Box3();
+ for(const x of [identity.min[0],identity.max[0]])for(const y of [identity.min[1],identity.max[1]])for(const z of [identity.min[2],identity.max[2]]){
+  expected.expandByPoint(new T.Vector3(x,y,z).applyMatrix4(matrix));
+ }
+ assert.deepEqual(webGLPalmOcclusionBounds(local,matrix,opts),{min:expected.min.toArray(),max:expected.max.toArray()});
+});
+
 function skyFixture(){
  const f=fixture();f.sky=buildWebGLNativeSky();f.root.add(f.sky.mesh);f.active.nativeIsland={sky:f.sky,water:{surfaceExclusionsEnforced:true,surfaceExclusions:[{id:'sky-test-dry-volume',min:[-99999,-99999,-99999],max:[99999,99999,99999]}]}};
  f.collect=()=>collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'});return f;

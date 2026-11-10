@@ -248,11 +248,37 @@ export function mediaScreenSurfaceExcluded(nativeIsland,projection,camera,{margi
 }
 const geometryBoundsCache=new WeakMap(),nativePlantCache=new WeakMap(),instanceBoundsCache=new WeakMap();
 function geometryBounds(geometry){
- let result=geometryBoundsCache.get(geometry);if(result)return result;const position=geometry?.attributes?.position??geometry?.getAttribute?.('position');if(!position?.count)return null;
+ const position=geometry?.attributes?.position??geometry?.getAttribute?.('position');if(!position?.count)return null;
+ const cached=geometryBoundsCache.get(geometry),version=position.version??position.data?.version;
+ if(cached?.position===position&&cached.version===version)return cached.bounds;
  const min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];for(let i=0;i<position.count;i++)for(let k=0;k<3;k++){const n=position.getComponent?position.getComponent(i,k):position.array[i*position.itemSize+k];if(!Number.isFinite(n))return null;min[k]=Math.min(min[k],n);max[k]=Math.max(max[k],n);}
- result={min,max,radius:Math.hypot(...min.map((n,i)=>Math.max(Math.abs(n),Math.abs(max[i]))))};geometryBoundsCache.set(geometry,result);return result;
+ const bounds={min,max,radius:Math.hypot(...min.map((n,i)=>Math.max(Math.abs(n),Math.abs(max[i]))))};geometryBoundsCache.set(geometry,{position,version,bounds});return bounds;
 }
-function transformedBounds(local,matrix,pad=0){const points=[];for(const x of [local.min[0],local.max[0]])for(const y of [local.min[1],local.max[1]])for(const z of [local.min[2],local.max[2]])points.push(transform(matrix,[x,y,z]));return{min:[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))-pad),max:[0,1,2].map(i=>Math.max(...points.map(p=>p[i]))+pad)};}
+function transformedBounds(local,matrix,pad=0){
+ const e=matrix.elements??matrix;
+ if(e[3]===0&&e[7]===0&&e[11]===0&&e[15]===1){
+  // Each output coordinate is affine. Its two extrema select the low or
+  // high endpoint of each input axis independently, including negative scales.
+  const min=[],max=[];
+  for(let i=0;i<3;i++){
+   const x0=e[i]*local.min[0],x1=e[i]*local.max[0],y0=e[i+4]*local.min[1],y1=e[i+4]*local.max[1],z0=e[i+8]*local.min[2],z1=e[i+8]*local.max[2];
+   min[i]=Math.min(x0,x1)+Math.min(y0,y1)+Math.min(z0,z1)+e[i+12]-pad;
+   max[i]=Math.max(x0,x1)+Math.max(y0,y1)+Math.max(z0,z1)+e[i+12]+pad;
+  }
+  return {min,max};
+ }
+ const points=[];for(const x of [local.min[0],local.max[0]])for(const y of [local.min[1],local.max[1]])for(const z of [local.min[2],local.max[2]])points.push(transform(matrix,[x,y,z]));
+ return {min:[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))-pad),max:[0,1,2].map(i=>Math.max(...points.map(p=>p[i]))+pad)};
+}
+
+function sameUpload(snapshot,source){
+ for(let i=0;i<snapshot.length;i++)if(snapshot[i]!==source[i])return false;
+ return true;
+}
+function packedFloatAttribute(attribute,size,count){
+ return attribute?.array instanceof Float32Array&&attribute.itemSize===size&&!attribute.normalized&&
+  !attribute.isInterleavedBufferAttribute&&attribute.array.length>=count*size;
+}
 /** Bound the installed non-canopy WebGL plant shader without adding height below its base. */
 export function webGLPalmOcclusionBounds(local,matrix,{height,lean,windStrength,windLength}){
  if(!local||![height,lean,windStrength,windLength].every(Number.isFinite)||height<0||lean<0||windLength<0)return null;
@@ -346,8 +372,18 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
      const plant=node.geometry.attributes?.iPlant,record=node.geometry.attributes?.iRecord,windMeta=node.material?.userData,windVector=windMeta?.nativeWindVector;
      // Both released palm material versions use the same vertex displacement. Version 2 changes the leaf surface.
      const provenPalm=node.userData?.mediaOcclusionPlant==='native-palm-v1'&&/^native-source-plants-webgl\/(?:1|2):palm(?:\||$)/.test(key);
-     const stamp=[provenPalm,node.instanceMatrix.version,plant?.version,record?.version,count,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,...node.matrixWorld.elements].join(',');let cached=instanceBoundsCache.get(node);
-     if(cached?.stamp!==stamp){const entries=[],grid=new Map(),cell=32,w=Math.max((active.project?.environment.windSpeed??6)*.1,.03);let radius=0;
+     const {aVeg,aMat}=node.geometry.attributes,index=node.geometry.index,windSpeed=active.project?.environment.windSpeed??6;
+     const stamp=[provenPalm,count,windSpeed,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,aVeg?.version,aMat?.version,index?.version,...node.matrixWorld.elements].join(',');
+     const uploads=[node.instanceMatrix.version,plant?.version,record?.version].join(',');
+     let cached=instanceBoundsCache.get(node);
+     const sameInputs=cached?.stamp===stamp&&cached.local===local&&cached.index===index&&cached.aVeg===aVeg&&cached.aMat===aMat&&cached.matrixAttribute===node.instanceMatrix&&cached.plant===plant&&cached.record===record;
+     // The plant renderer repacks draw buffers for each camera. Returning to
+     // the main view may upload the identical visible instances a second time.
+     // Compare private copies of their active values before reusing the grid
+     // and per-triangle palm bounds. Upload order is significant.
+     const identicalUpload=sameInputs&&(cached.uploads===uploads||(cached.snapshot&&
+      sameUpload(cached.snapshot.matrices,matrices)&&sameUpload(cached.snapshot.plants,plant.array)&&sameUpload(cached.snapshot.records,record.array)));
+     if(!identicalUpload){const entries=[],grid=new Map(),cell=32,w=Math.max(windSpeed*.1,.03);let radius=0;
       for(let i=0;i<count;i++){
        const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16)),scale=Math.max(Math.hypot(...matrix.slice(0,3)),Math.hypot(...matrix.slice(4,7)),Math.hypot(...matrix.slice(8,11)));
        const palm=provenPalm&&record?.getZ(i)<=.5;
@@ -356,7 +392,12 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
        const x=(b.min[0]+b.max[0])/2,z=(b.min[2]+b.max[2])/2;radius=Math.max(radius,(b.max[0]-b.min[0])/2,(b.max[2]-b.min[2])/2);entries.push(b);
        const cellKey=Math.floor(x/cell)+':'+Math.floor(z/cell);let bucket=grid.get(cellKey);if(!bucket)grid.set(cellKey,bucket=[]);bucket.push(i);
       }
-      cached={stamp,entries,grid,cell,radius,details:new Map()};instanceBoundsCache.set(node,cached);}
+      let snapshot=null;
+      if(packedFloatAttribute(node.instanceMatrix,16,count)&&packedFloatAttribute(plant,4,count)&&packedFloatAttribute(record,4,count)){
+       snapshot={matrices:matrices.slice(0,count*16),plants:plant.array.slice(0,count*4),records:record.array.slice(0,count*4)};
+      }
+      cached={stamp,uploads,snapshot,local,index,aVeg,aMat,matrixAttribute:node.instanceMatrix,plant,record,entries,grid,cell,radius,details:new Map()};instanceBoundsCache.set(node,cached);
+     }else cached.uploads=uploads;
      for(let z=Math.floor((cone.min[2]-cached.radius)/cached.cell);z<=Math.floor((cone.max[2]+cached.radius)/cached.cell);z++)for(let x=Math.floor((cone.min[0]-cached.radius)/cached.cell);x<=Math.floor((cone.max[0]+cached.radius)/cached.cell);x++)for(const i of cached.grid.get(x+':'+z)??[]){stats.instances++;const b=cached.entries[i];if(boxIntersects(b,cone)){
        const palm=provenPalm&&record?.getZ(i)<=.5;
        if(palm){

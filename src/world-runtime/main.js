@@ -286,7 +286,9 @@ async function init(){
    let eyeActive=!!playerEyes?.controller.status().active,eyeFrame=eyeActive?playerEyes.controller.update():null;eyeActive=!!eyeFrame;
    if(!canMove||!input.enabled||eyeActive||!followCamera.enabled||document.querySelector('dialog[open]'))avatar.cancelGesture?.();
    const env=graphics.environment(host.environment()??{timeOfDay:14,cloudCoverage:.49,windSpeed:6,sunAzimuth:0});
-    if(eyeActive||!app.freeCam)host.update(dt,time,{move:eyeActive||canMove,interact:!eyeActive&&canMove,environment:env,viewCamera:eyeFrame&&eyeFrame.target.worldId===host.active?.identity.worldId?eyeFrame.camera:engine.camera});
+    // A follow camera replaces the player's camera before any draw. Stream terrain for
+    // the player now, and pack vegetation for the actual camera in bindView below.
+    if(eyeActive||!app.freeCam)host.update(dt,time,{preparePlants:!(isWebGL&&followCamera.enabled&&!eyeActive),move:eyeActive||canMove,interact:!eyeActive&&canMove,environment:env,viewCamera:eyeFrame&&eyeFrame.target.worldId===host.active?.identity.worldId?eyeFrame.camera:engine.camera});
     if(canMove&&!eyeActive&&input.hit('KeyE')){const device=retro.nearest(engine.camera.position),tv=nearestMedia();if(device){const computer=host.active.project.objects.find(o=>o.id===device.objectId);if(computer)void openComputer(computer,host.active,device);else if(!ownerMode()){interactionContext=interactionState();retro.open(device);}else report('Access restricted');}else if(tv)void openMedia(tv,host.active);
      else if(!ownerMode()&&host.active?.defenderCabinet?.near(host.active.player.position))host.active.defenderPlayer.cabinetAction();
      else if(!ownerMode()&&host.active?.snooker?.near(host.active.player.position)){
