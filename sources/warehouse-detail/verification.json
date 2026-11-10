@@ -1,0 +1,15 @@
+{
+  "schema": "warehouse-library-detail-verification/1",
+  "worldId": "elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319",
+  "snapshot": "eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db",
+  "assets": 11,
+  "triangles": 47903,
+  "sourcePrimitives": 32,
+  "addedVisualObjects": 11,
+  "retiredVisualRecords": 34,
+  "collisionBoxesUnchanged": 116,
+  "interactionsUnchanged": 1,
+  "untouchedOriginalObjects": 1699,
+  "nativeVisualAcceptance": "pending parent review",
+  "fpsAcceptance": "pending parent device review"
+}

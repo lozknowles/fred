@@ -1,0 +1,94 @@
+{
+  "snapshot": "eca8167b0492303627c1e72e80c0bfe2960b86ab4ff33588c9cf3ddd6ef795db",
+  "contentDigest": "064a7c3dc09ef745ba07fe6fde9916ca2514c450f6958b66c2517602a168d347",
+  "assets": [
+    {
+      "id": "warehouse-detail:chaise",
+      "path": "assets/d177ce2fd63043e575e4bb723afb99970b3f77cc2b774b639438e07b2ba0037b.glb",
+      "sha256": "d177ce2fd63043e575e4bb723afb99970b3f77cc2b774b639438e07b2ba0037b",
+      "bytes": 868996,
+      "triangles": 25128,
+      "primitives": 9
+    },
+    {
+      "id": "warehouse-detail:ottoman",
+      "path": "assets/a83625f6d5ed0e2e8c03b55556ed74a4de22db3cfc703e3b386df23a63b0fa71.glb",
+      "sha256": "a83625f6d5ed0e2e8c03b55556ed74a4de22db3cfc703e3b386df23a63b0fa71",
+      "bytes": 372840,
+      "triangles": 7824,
+      "primitives": 3
+    },
+    {
+      "id": "warehouse-detail:wooden_cutting_board",
+      "path": "assets/d71ed7aad4acd2761cc32077c2b294351f83f909c8faaebf9ab683eddc863e64.glb",
+      "sha256": "d71ed7aad4acd2761cc32077c2b294351f83f909c8faaebf9ab683eddc863e64",
+      "bytes": 125164,
+      "triangles": 1499,
+      "primitives": 1
+    },
+    {
+      "id": "warehouse-detail:fish_knife",
+      "path": "assets/de32c33f51d4fe088bd695bed7b113405e0f3f0da9276665d6ff899e2dbb0d6c.glb",
+      "sha256": "de32c33f51d4fe088bd695bed7b113405e0f3f0da9276665d6ff899e2dbb0d6c",
+      "bytes": 134708,
+      "triangles": 1498,
+      "primitives": 1
+    },
+    {
+      "id": "warehouse-detail:wooden_lantern_01",
+      "path": "assets/c5e1fcd75fdaff14c89a12d162dbb2e7c19ee0f234197fce34b0586cf7efd807.glb",
+      "sha256": "c5e1fcd75fdaff14c89a12d162dbb2e7c19ee0f234197fce34b0586cf7efd807",
+      "bytes": 241092,
+      "triangles": 3998,
+      "primitives": 1
+    },
+    {
+      "id": "warehouse-detail:wooden_crate_01",
+      "path": "assets/661f599f13e6f945e7fe2c17579a5479cc8e835ee6d5d8a20fe8e2012b8041d6.glb",
+      "sha256": "661f599f13e6f945e7fe2c17579a5479cc8e835ee6d5d8a20fe8e2012b8041d6",
+      "bytes": 195928,
+      "triangles": 3497,
+      "primitives": 1
+    },
+    {
+      "id": "warehouse-detail:wooden_bucket_01",
+      "path": "assets/c718c94f6e0afec87c80e0988f9e73a37057f7198b1e567c28d405ec1c110c9f.glb",
+      "sha256": "c718c94f6e0afec87c80e0988f9e73a37057f7198b1e567c28d405ec1c110c9f",
+      "bytes": 184576,
+      "triangles": 2997,
+      "primitives": 1
+    },
+    {
+      "id": "warehouse-detail:kitchenstove",
+      "path": "assets/3239edb36295dfca9530a9b9a6ad0aff98ce62e7cf8d13ca2a5a1a6b2a904656.glb",
+      "sha256": "3239edb36295dfca9530a9b9a6ad0aff98ce62e7cf8d13ca2a5a1a6b2a904656",
+      "bytes": 54324,
+      "triangles": 830,
+      "primitives": 6
+    },
+    {
+      "id": "warehouse-detail:toaster",
+      "path": "assets/38c1fb7b122be9997758c8ee855d87f28014cf282f24d66d39f4e8d8b236d2af.glb",
+      "sha256": "38c1fb7b122be9997758c8ee855d87f28014cf282f24d66d39f4e8d8b236d2af",
+      "bytes": 14924,
+      "triangles": 220,
+      "primitives": 2
+    },
+    {
+      "id": "warehouse-detail:kitchencoffeemachine",
+      "path": "assets/063f582c6fa0f00a9f24e3393dac2295491c4becdaf5513c893ab1a2826b6ec3.glb",
+      "sha256": "063f582c6fa0f00a9f24e3393dac2295491c4becdaf5513c893ab1a2826b6ec3",
+      "bytes": 13332,
+      "triangles": 166,
+      "primitives": 3
+    },
+    {
+      "id": "warehouse-detail:kitchenblender",
+      "path": "assets/f471defb5b2b1cf3b949a1a8aaef0a8b727afe662b0815068cf4e963325a3c1f.glb",
+      "sha256": "f471defb5b2b1cf3b949a1a8aaef0a8b727afe662b0815068cf4e963325a3c1f",
+      "bytes": 18728,
+      "triangles": 246,
+      "primitives": 4
+    }
+  ]
+}

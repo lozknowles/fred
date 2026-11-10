@@ -1,0 +1,11 @@
+# Warehouse library detail
+
+All derivatives here retain per-asset provenance and source SHA256 in active assets.json and report.json.
+
+- Chaise and round ottoman: abd3d, BlenderKit **Chaise lounge (Sofa)**, CC0, https://www.blendkit.com/asset-gallery-detail/1fa0bc00-505a-40cb-bcc4-19f237e041d4/ . Exact downloaded metadata is retained in blenderkit-source-metadata.json. Source blend remains in the user's local Blender library; export-blend.py deterministically evaluates one subdivision level, decimates dense parts, centers unit geometry, embeds 512px original maps. This is an affordable static derivative of the actual downloaded asset, including curved timber base, piping, woven cushions and pillows.
+- Scanned cutting board, knife, wooden lantern, wooden crate and bucket: Poly Haven, CC0 1.0. See POLY-HAVEN-CREDITS.md for exact source links and original Blender decimation budgets. integrate.mjs converts exact existing packed vertices/normals/UVs/material layers to standard GLB with original 512px albedo; it does not substitute procedural shapes.
+- Stove/oven, toaster, coffee machine, blender: Kenney Furniture Kit, CC0-1.0, https://kenney.nl/assets/furniture-kit . Byte-identical GLBs from retained ElseMesh catalogue revision 7be9b573bc74f32ed766b44b3f46550d02ca83b5, inventory licence evidence https://kenney.nl/support and source/LICENSE. Their GLB SHA256 values are retained per asset.
+
+Original authored Warehouse components retain their existing MIT notices. Generator code in this directory is MIT, Copyright (c) 2026 Lawrence Knight.
+
+Run export-blend.py in Blender 4.5.14, then node integrate.mjs on the recorded baseSnapshot. The original IDs remain on retired visual records; the sole solid long-sofa base is converted to a collision-only box with its exact former world bounds. New decorative visuals have no collision, interaction, access or portal capability. Existing TV/terminal/doorway/structural data is untouched. Frame-rate and final visual acceptance require the parent task's native scene review.

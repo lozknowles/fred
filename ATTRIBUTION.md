@@ -74,3 +74,7 @@ Asset-specific source and licence records remain authoritative. No YouTube video
 - tree_bark_03-nor_gl — CC0; see vegetation-credits; source: Original native vegetation asset closure
 
 Readable native vegetation credits are retained in NATIVE-VEGETATION-CREDITS.md; the byte-identical hashed original remains in the native asset closure.
+
+## Private Warehouse library detail
+
+BlenderKit chaise/ottoman by abd3d, Poly Haven scanned props, and Kenney Furniture Kit appliances are CC0; exact source URLs, original metadata, derivative processing and per-asset hashes are retained in sources/warehouse-detail/CREDITS.md and active assets.json. No licence of an unrelated asset is inferred from these records.
