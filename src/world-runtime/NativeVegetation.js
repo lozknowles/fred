@@ -3,8 +3,7 @@ import {nativeLeafAtlasMetadata} from './NativeLeafAtlasData.js';
 export {NATIVE_VEGETATION_SURFACE_GLSL} from './NativeVegetationSurface.js';
 export {nativeLeafAtlasMetadata};
 
-// Vite copies this local asset into both the normal and repository runtime packages.
-export const nativeLeafAtlasURL = new URL('./native-leaf-atlas.png',import.meta.url);
+export const nativeLeafAtlasURL = (import.meta.env?.BASE_URL ?? './') + 'textures/vegetation/native-leaf-atlas.png';
 export async function loadNativeLeafAtlas(){
  const response=await fetch(nativeLeafAtlasURL);if(!response.ok)throw Error('Native leaf atlas could not be loaded.');
  const bitmap=await createImageBitmap(await response.blob(),{colorSpaceConversion:'none',premultiplyAlpha:'none',imageOrientation:'none'});

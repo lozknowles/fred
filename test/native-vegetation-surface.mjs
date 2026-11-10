@@ -6,9 +6,10 @@ import {createHash} from 'node:crypto';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
 import {loadNativeLeafAtlas,nativeLeafAtlasURL,nativeLeafAtlasMetadata} from '../src/world-runtime/NativeVegetation.js';
 const sha=value=>createHash('sha256').update(value).digest('hex');
+const atlasFile = new URL('../public/textures/vegetation/native-leaf-atlas.png',import.meta.url);
 
 test('offline authored canopy atlas retains four distinct, supersampled coverage tiles and numeric channels',async()=>{
- const png=await readFile(nativeLeafAtlasURL),meta=nativeLeafAtlasMetadata;
+ const png=await readFile(atlasFile),meta=nativeLeafAtlasMetadata;
  assert.equal(sha(png),meta.pngSHA256);
  assert.equal(sha(await readFile(new URL('../src/world/vegetation/LeafTextures.js',import.meta.url))),meta.sourceSHA256);
  assert.equal(png.readUInt32BE(16),1024);assert.equal(png.readUInt32BE(20),1024);
@@ -30,7 +31,7 @@ test('offline authored canopy atlas retains four distinct, supersampled coverage
 
 test('production atlas loader preserves data channels, source filter policy and bitmap ownership',async()=>{
  const originalFetch=globalThis.fetch,originalDecode=globalThis.createImageBitmap;let closed=0,seenOptions;
- globalThis.fetch=async url=>{assert.equal(url,nativeLeafAtlasURL);return new Response(await readFile(nativeLeafAtlasURL));};
+ globalThis.fetch=async url=>{assert.equal(url,nativeLeafAtlasURL);return new Response(await readFile(atlasFile));};
  globalThis.createImageBitmap=async(blob,options)=>{seenOptions=options;assert.ok(blob.size>300000);return{width:1024,height:1024,close(){closed++;}};};
  try{
   const texture=await loadNativeLeafAtlas();
