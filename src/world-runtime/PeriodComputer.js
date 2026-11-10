@@ -1,4 +1,4 @@
-import { createMicroGuest, C64_SNAKE } from './MicroComputerGuest.js';
+import { createMicroGuest, C64_SNAKE, BBC_GRAPHICS_PROGRAM } from './MicroComputerGuest.js';
 import { SunComputer } from '../world/SunComputer.js';
 import { SunGuestConsole } from './SunGuestConsole.js';
 
@@ -15,7 +15,12 @@ export class PeriodComputer {
   this.leave=this.button('Leave computer',()=>this.close());
   this.status=el('p','',shell);this.status.className='fred-period-status';this.status.setAttribute('role','status');
   el('p',kind==='sun'?'Boot NetBSD/SPARC to use a disposable Sun workstation. End OS session discards your changes.':'Click the emulated screen to type. These computers have no FRED login. Use Leave computer above to return; an emulator may capture Escape. Switching away stops the guest; reopen it to restart.',shell);
-  if(kind==='bbc'){const detail=el('details',null,shell);el('summary','Try a BBC BASIC graphics program',detail);el('pre','10 MODE 2\n20 FOR I=0 TO 15\n30 GCOL 0,I\n40 MOVE 640,512\n50 DRAW 640+480*COS(I*PI/8),512+480*SIN(I*PI/8)\n60 NEXT\nRUN',detail).className='fred-period-code';el('p','Type these lines in BBC BASIC, pressing Return after each. MODE, GCOL, MOVE and DRAW are native BBC BASIC commands.',detail);}
+  if(kind==='bbc'){
+   const detail=el('details',null,shell);el('summary','Edit the BBC BASIC program',detail);
+   this.program=el('textarea',null,detail);this.program.setAttribute('aria-label','BBC BASIC program');this.program.rows=7;this.program.spellcheck=false;
+   this.program.style.cssText='width:100%;box-sizing:border-box;font:15px monospace';this.program.value=BBC_GRAPHICS_PROGRAM;
+   el('p','Run BBC program boots a fresh Model B, types these lines on its keyboard, then enters RUN.',detail);
+  }
   this.mount=el('div',null,shell);this.mount.className='fred-period-mount';
   if(kind==='sun'){
    this.os=new SunGuestConsole({...app,document:this.doc,window:this.win,mount:this.mount,status:this.status,isActive:()=>this.active,onRevoked:()=>this.close({resume:false})});
@@ -27,6 +32,11 @@ export class PeriodComputer {
    this.button('End OS session',()=>this.os.end());
   }else{
    this.button('Reset computer',()=>this.guest?.reset());
+   if(kind==='bbc')this.button('Run BBC program',()=>{
+    if(!this.guest)return;
+    try{this.guest.runProgram(this.program.value);this.status.textContent='The Model B is typing the program. RUN follows the last line.';this.guest.focus();}
+    catch(error){this.status.textContent=error.message;}
+   });
    if(kind==='c64')this.button('Load Snake game',()=>{this.guest?.loadGame?.();this.status.textContent='Snake · '+C64_SNAKE.controls;this.guest?.focus();});
   }
   this.dialog.addEventListener('cancel',e=>{e.preventDefault();this.close();});for(const event of ['keydown','keyup','paste','copy','cut'])this.dialog.addEventListener(event,e=>e.stopPropagation());

@@ -5,6 +5,21 @@ export const MICRO_GUEST_PROVIDERS = Object.freeze({
 });
 export const C64_SNAKE = Object.freeze({name:'Snake',author:'David R. Van Wagner',license:'MIT',commit:'69a773924b6e436da836f980be0f0d99ef21623c',source:'https://github.com/davervw/c-snake/tree/69a773924b6e436da836f980be0f0d99ef21623c',url:'https://raw.githubusercontent.com/davervw/c-snake/69a773924b6e436da836f980be0f0d99ef21623c/snake64.prg',controls:'Z turns left; / turns right; Return pauses or resumes.'});
 
+export const BBC_GRAPHICS_PROGRAM = [
+ '10 MODE 2','20 FOR I=1 TO 7','30 GCOL 0,I','40 MOVE 640,512',
+ '50 DRAW I*175,100','60 NEXT I','70 PRINT "Hello Ed & Vicco"'
+].join('\n');
+
+export function bbcProgramURL(text) {
+ const program=String(text).replace(/\r\n?/g,'\n').trim();
+ if(!program||program.length>2048||/[^\x20-\x7e\n]/.test(program))throw Error('Enter up to 2,048 printable BBC BASIC characters.');
+ const url=new URL(MICRO_GUEST_PROVIDERS.bbc.url);
+ // jsbeeb's autotype option presses keys on its virtual keyboard after boot.
+ url.searchParams.set('autotype',program+'\nRUN\n');
+ // jsbeeb also supports older URL parsers that use decodeURIComponent.
+ return url.href.replaceAll('+','%20');
+}
+
 /** Call only following the host permission check and an explicit user activation. */
 export function createMicroGuest({kind,document:doc=globalThis.document,onStatus=()=>{}}={}) {
  const provider=MICRO_GUEST_PROVIDERS[kind];
@@ -26,5 +41,6 @@ export function createMicroGuest({kind,document:doc=globalThis.document,onStatus
  function diagnostics(){return {kind,provider:provider.provider,url:activeUrl,online:true,state,generation,iframePresent:!!iframe,readiness:'Cross-origin page load is not proof of BASIC readiness.',guestStateScope:'local browser session; not shared with other players'};}
  function focus(){if(!closed)iframe?.focus();}
  function dispose(){if(closed)return;closed=true;destroyFrame();status('closed');element.remove();}
- reset();return {element,reset,focus,dispose,diagnostics,loadGame};
+ function runProgram(text){if(kind!=='bbc'||closed)return false;return boot(bbcProgramURL(text));}
+ reset();return {element,reset,focus,dispose,diagnostics,loadGame,runProgram};
 }
