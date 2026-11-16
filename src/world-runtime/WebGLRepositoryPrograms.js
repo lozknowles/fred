@@ -5,6 +5,7 @@ import {withWebGLPortalRenderState} from './WebGLRenderState.js';
 
 export function isQualifiedFirstTripPackage(kind,identity){
  return kind==='published' && (isQualifiedWarehousePlantOcclusion(identity) ||
+  (identity?.worldId==='elsemesh.world:63121706-d439-4091-95b0-780b7d8563e8' && identity.contentDigest==='36e60f42dffa422ef20dce60a14a9da238ccce49eb96e248dc5952f6b3429808') ||
   (identity?.worldId===SHIFT_WORLD_ID && identity.contentDigest===SHIFT_CONTENT_DIGEST));
 }
 

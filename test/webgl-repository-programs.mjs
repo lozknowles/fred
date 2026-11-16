@@ -91,6 +91,8 @@ test('only the two pinned published world packages opt into first-trip preparati
  const warehouse='elsemesh.world:2842c4f2-93a0-4492-b942-e53e524de319';
  assert.ok(isQualifiedFirstTripPackage('published',{worldId:warehouse,contentDigest:SHIFT_WAREHOUSE_CONTENT_DIGEST}));
  assert.ok(isQualifiedFirstTripPackage('published',{worldId:SHIFT_WORLD_ID,contentDigest:SHIFT_CONTENT_DIGEST}));
+ const dock={worldId:'elsemesh.world:63121706-d439-4091-95b0-780b7d8563e8',contentDigest:'36e60f42dffa422ef20dce60a14a9da238ccce49eb96e248dc5952f6b3429808'};
+ assert.equal(isQualifiedFirstTripPackage('published',dock),true);assert.equal(isQualifiedFirstTripPackage('published',{...dock,contentDigest:'edited'}),false);assert.equal(isQualifiedFirstTripPackage('network',dock),false);
  assert.equal(isQualifiedFirstTripPackage('network',{worldId:SHIFT_WORLD_ID,contentDigest:SHIFT_CONTENT_DIGEST}),false);
  assert.equal(isQualifiedFirstTripPackage('published',{worldId:warehouse,contentDigest:'edited'}),false);
  assert.equal(isQualifiedFirstTripPackage('published',{worldId:'unrelated',contentDigest:SHIFT_WAREHOUSE_CONTENT_DIGEST}),false);

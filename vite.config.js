@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { stackSafeWorldWalk } from './tools/stack-safe-world-walk.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createOutputSurfaceTransform } from './tools/output-surface-transform.mjs';
@@ -8,6 +9,7 @@ export default defineConfig( {
 	// Relative assets support publication under any application sub-path.
 	base: './',
 	plugins: [createOutputSurfaceTransform({root})],
+	worker: {plugins:()=>[stackSafeWorldWalk()]},
 	resolve: { dedupe: ['three'], alias: [ { find: 'three/addons/postprocessing/Pass.js', replacement: resolve(root,'node_modules/three/examples/jsm/postprocessing/Pass.js') }, { find: /^three$/, replacement: resolve(root,'src/world-runtime/SplatThree.js') } ] },
 	// Dev must use the same transformed contract/Three instance as production.
 	optimizeDeps: { exclude: ['@sparkjsdev/spark','three'] },

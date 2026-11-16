@@ -1,6 +1,7 @@
 import * as N from '../engine/index.js';
 import {Material} from '../engine/render/Material.js';
-import {T,generateLandscapeInstances,createLandscapeCollisionIndex,landscapeChunks,sceneryParts,landscapeWaterGeometry,updateLandscapeWater,bakeLandscapeAtlas,threeAtlas,installLandscapeShader,landscapePartTint} from './vendor/world-engine-contract.js';
+import {publishedLandscapeChunks} from './PublishedAdmissionData.js';
+import {T,generateLandscapeInstances,createLandscapeCollisionIndex,sceneryParts,landscapeWaterGeometry,updateLandscapeWater,bakeLandscapeAtlas,threeAtlas,installLandscapeShader,landscapePartTint} from './vendor/world-engine-contract.js';
 export function landscapeAssets(project){return generateLandscapeInstances(project).filter(i=>i.assetRef).map(i=>({...i,kind:'glb',assetId:i.assetRef,visible:true,collision:'none',landscapeTint:landscapePartTint(i).toArray(),landscapeChunk:Math.floor(i.position[0]/64)+':'+Math.floor(i.position[2]/64)}));}
 export function addLandscapeCollisions(project,colliders){
  const index=createLandscapeCollisionIndex(project);
@@ -16,7 +17,7 @@ export async function installRepositoryLandscapeMaterial(project,material){
 /** Canonical chunks and shared geometry variants are supplied by the builder contract. */
 export function buildRepositoryLandscape(project,{native=false,convertGeometry}={}){
  const E=native?N:T,root=new E.Group();let count=0,batches=0;const variants=new Map();
- for(const source of landscapeChunks(project).values()){
+ for(const source of publishedLandscapeChunks(project).values()){
   const items=source.filter(i=>!i.assetRef);if(!items.length)continue;const first=items[0];count+=items.length;
   const variantKey=[first.kind,first.treeSpecies,first.seed%4].join('/');
   if(!variants.has(variantKey))variants.set(variantKey,sceneryParts(first.kind,first.treeSpecies,first.seed%4).map(part=>{const geometry=native?convertGeometry(part.geometry):part.geometry;if(native)part.geometry.dispose();const material=native?new Material({name:'landscape-'+first.kind,color:part.color,roughness:.9,side:'double'}):new T.MeshStandardMaterial({color:part.color,roughness:.9,side:T.DoubleSide});return {geometry,material,semantic:part.semantic};}));

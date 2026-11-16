@@ -88,7 +88,8 @@ test('three-world star renders only catalogued authored portals and reuses all t
  assert.equal(r.cache.limit,3);assert.deepEqual([...r.views.entries.keys()],['elsemesh-portal:0','elsemesh-portal:dock']);
  assert.equal(await r.preview(opening.project.portals[0]),false);const before=f.fetches.length;assert.equal(await r.cross(opening.project.portals[1]),false);assert.equal(f.fetches.length,before);
  const room=opening.project.portals.find(p=>p.id==='elsemesh-portal:0'),dock=opening.project.portals.find(p=>p.id==='elsemesh-portal:dock');
- const preview=r.preview,updated=[];r.preview=async p=>{updated.push(p.id);return false;};r.update();assert.deepEqual(updated,[room.id,dock.id]);r.preview=preview;
+ let now=0;r.previewQueue.now=()=>now;const preview=r.preview,updated=[];r.preview=async p=>{updated.push(p.id);r.previewRecords.set(p.id,{loading:true});return true;};
+ r.update();now=170;r.update();assert.deepEqual(updated,[room.id]);await Promise.resolve();now=1000;r.update();assert.deepEqual(updated,[room.id,dock.id]);await Promise.resolve();r.previewRecords.clear();r.preview=preview;
  await Promise.all([r.preview(room),r.preview(dock)]);assert.equal(r.cache.records.size,3);assert.equal(r.previewRecords.get(room.id).worldId,f.projects[1].metadata.worldId);assert.equal(r.previewRecords.get(dock.id).worldId,f.projects[2].metadata.worldId);
  const roots=[...r.cache.records.values()].map(record=>record.candidate.root);
  const cross=async portal=>{const source=f.host.active;source.player.position.set(portal.position[0],0,-.1);assert.equal(await r.cross(portal,source,{position:[portal.position[0],0,.1],yaw:0,pitch:.2}),true);};

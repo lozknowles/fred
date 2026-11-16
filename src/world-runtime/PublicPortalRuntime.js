@@ -1,9 +1,10 @@
 import {PublishedWorldCache} from './PublishedWorldCache.js';
 import {validatePublishedWorldCatalog} from './PublishedWorldCatalog.js';
-import {hostedRepositorySource} from './HostedRepository.js';
+import {admitPublishedWorld} from './PublishedAdmission.js';
+import {PublishedPreviewQueue,previewRank} from './PublishedPreviewQueue.js';
 import {Player} from '../player/Player.js';
 import {Vector3} from '../engine/index.js';
-import {loadWorldSource,describeRuntimeWorld,portalLocalPoint,portalWorldPoint,mapPortalPoint,mapPortalDirection,mapPortalYaw,sweepPortalCapsule} from './vendor/world-engine-contract.js';
+import {describeRuntimeWorld,portalLocalPoint,portalWorldPoint,mapPortalPoint,mapPortalDirection,mapPortalYaw,sweepPortalCapsule} from './vendor/world-engine-contract.js';
 const check=(v,m)=>{if(!v)throw Error(m);};
 /** A published single-player journey. It never creates a network identity,
  * membership, owner grant, network peer, or authority receipt. */
@@ -11,6 +12,7 @@ export class PublicPortalRuntime{
  constructor({catalog,engine,host,input,views,buildScene,disposeCandidate,addPortalFrame,portalEffects,onStatus=()=>{},onChange=()=>{},onActivated=()=>{},baseURL=location.href,fetcher=fetch}={}){
   this.catalog=validatePublishedWorldCatalog(catalog,{baseURL});check(engine&&host&&input&&views&&buildScene&&disposeCandidate,'Public runtime dependencies missing');Object.assign(this,{engine,host,input,views,buildScene,disposeCandidate,addPortalFrame,portalEffects,onStatus,onChange,onActivated,baseURL,fetcher});
   this.mode='published';this.connected=false;this.config=null;this.transport={closed:true,frozen:false,connectionEpoch:0};this.loaded=new Map();this.descriptors=new Map();this.presence=new Map();this.previewRecords=new Map();this.loads=new Map();this.builds=new Map();this.pending=false;this.authorityOffline=false;this.enabled=false;this.disposed=false;this.epoch=0;this.lastPosition=null;this.errors=new Map();this.crossings=0;this.activeRecord=null;this.preparations=new Map();this.closingCaches=new Set();
+  this.previewQueue=new PublishedPreviewQueue();this.admissions=new WeakMap();this.abortAdmissions=new AbortController();
   this.views.setTransparentPlaceholders?.(true);
   this.originalHooks={acquireResources:host.acquireResources,registerResources:host.registerResources,retainResources:host.retainResources};this.newCache();this.nestedLoads=new Map();this.views.resolveNestedDestination=request=>this.resolveNestedPreview(request);
  }
@@ -40,11 +42,11 @@ export class PublicPortalRuntime{
  }
  async load(id){
   const e=this.entry(id);check(e,'World is not in this published catalog');let loaded=this.loaded.get(id);if(loaded){this.assertLoaded(loaded);return loaded;}if(this.loads.has(id))return this.loads.get(id);const epoch=this.epoch;
-  const work=(async()=>{const source=hostedRepositorySource(e.bundlePath,{baseURL:this.baseURL,origin:new URL(this.baseURL).origin,fetch:this.fetcher});const value=await loadWorldSource(source,{expectedWorldId:e.worldId,expectedContentDigest:e.contentDigest});this.assertLoaded(value);check(epoch===this.epoch&&this.enabled,'Published load superseded');this.loaded.set(id,value);return value;})();this.loads.set(id,work);try{return await work;}finally{if(this.loads.get(id)===work)this.loads.delete(id);}
+  const work=(async()=>{const {loaded,descriptor}=await admitPublishedWorld(e,{baseURL:this.baseURL,fetcher:this.fetcher,signal:this.abortAdmissions.signal});this.assertLoaded(loaded);check(epoch===this.epoch&&this.enabled,'Published load superseded');this.admissions.set(loaded,descriptor);this.loaded.set(id,loaded);return loaded;})();this.loads.set(id,work);try{return await work;}finally{if(this.loads.get(id)===work)this.loads.delete(id);}
  }
  async package(id){
   const loaded=await this.load(id);let record=this.cache.get(loaded);if(record)return record;if(this.builds.has(id))return this.builds.get(id);const epoch=this.epoch;
-  const work=(async()=>{let candidate;try{candidate=await this.buildScene(describeRuntimeWorld(loaded.project),this.engine.camera.clone(),{loaded});check(epoch===this.epoch&&this.enabled,'Published preparation superseded');await this.finishCandidate(candidate);check(epoch===this.epoch&&this.enabled,'Published preparation superseded');record=this.cache.register(loaded,candidate);return record;}catch(error){if(candidate){candidate.disposePublicViews?.();this.disposeCandidate(candidate);}throw error;}})();this.builds.set(id,work);try{return await work;}finally{if(this.builds.get(id)===work)this.builds.delete(id);}
+  const work=(async()=>{let candidate;try{candidate=await this.buildScene(this.admissions.get(loaded)??describeRuntimeWorld(loaded.project),this.engine.camera.clone(),{loaded});check(epoch===this.epoch&&this.enabled,'Published preparation superseded');await this.finishCandidate(candidate);check(epoch===this.epoch&&this.enabled,'Published preparation superseded');record=this.cache.register(loaded,candidate);return record;}catch(error){if(candidate){candidate.disposePublicViews?.();this.disposeCandidate(candidate);}throw error;}})();this.builds.set(id,work);try{return await work;}finally{if(this.builds.get(id)===work)this.builds.delete(id);}
  }
  validateRoute(source,portal,destination){const r=this.route(source.identity.worldId,portal.id),exit=destination.loaded.project.portals?.find(p=>p.id===r?.destinationPortalId);check(r&&r.destinationWorldId===portal.destination?.worldId&&r.destinationPortalId===portal.destination?.portalId&&portal.enabled&&portal.traversal?.enabled!==false&&exit?.enabled&&exit.traversal?.enabled!==false&&exit.destination?.worldId===r.sourceWorldId&&exit.destination?.portalId===r.portalId,'Published authored portal pair mismatch');return exit;}
  async activateOffline(expected=this.host.active){
@@ -63,6 +65,7 @@ export class PublicPortalRuntime{
   }
  }
  setActive(active){
+  this.previewQueue.reset();
   this.nestedAdmissions=new WeakMap();this.nestedLoads.clear();
   // Reset the sweep at the positive-side arrival. Outward motion cannot cross;
   // a later inward sweep is a deliberate return, even before clearing the frame.
@@ -107,7 +110,22 @@ export class PublicPortalRuntime{
   }catch(error){this.meld?.cancel(meld);if(prepared)this.host.discardPrepared(prepared);if(this.enabled&&epoch===this.epoch&&source===this.host.active&&generation===this.host.generation){source.player.position.fromArray(saved.position);source.player.velocity.set(0,0,0);source.player.yaw=saved.yaw;source.player.pitch=saved.pitch;this.input._clearTransientInput?.();source.player.update(0);this.lastPosition=source.player.position.toArray();this.errors.set(portal.id,error.message);this.onStatus('Stayed in source world: '+error.message);}return false;
   }finally{if(epoch===this.epoch){this.pending=false;const sameSource=this.host.active===source&&this.host.generation===generation,ownDestination=activated&&this.host.active===activated&&this.host.generation===activationGeneration;if(this.enabled&&(sameSource||ownDestination)){this.input._clearTransientInput?.();if(wasEnabled)this.input.resume();}}}
  }
- update(dt,time,{allowCrossing=true}={}){if(!this.enabled||this.pending||!this.host.active)return;const active=this.host.active,position=active.player.position.toArray();for(const portal of this.routedPortals(active.identity.worldId,active.project)){const route=this.route(active.identity.worldId,portal.id);if(!route)continue;const local=portalLocalPoint(portal,position);const record=this.previewRecords.get(portal.id);if(portal.enabled&&portal.view?.enabled!==false&&Math.hypot(...local)<(portal.view?.maxDistance??30)&&(!record||record.retryAt&&record.retryAt<performance.now()))void this.preview(portal);if(allowCrossing&&active.player.mode==='walk'&&this.lastPosition&&sweepPortalCapsule({portal,previousFeet:this.lastPosition,nextFeet:position,radius:.3,bodyHeight:1.8})){const checkpoint={position:[...this.lastPosition],velocity:active.player.velocity.toArray(),yaw:active.player.yaw,pitch:active.player.pitch};void this.cross(portal,active,checkpoint,{physical:true});break;}}this.lastPosition=position;}
+ update(dt,time,{allowCrossing=true}={}){
+  if(!this.enabled||this.pending||!this.host.active)return;
+  const active=this.host.active,position=active.player.position.toArray(),demand=[],attention=[];
+  for(const portal of this.routedPortals(active.identity.worldId,active.project)){
+   if(allowCrossing&&active.player.mode==='walk'&&this.lastPosition&&sweepPortalCapsule({portal,previousFeet:this.lastPosition,nextFeet:position,radius:.3,bodyHeight:1.8})){
+    const checkpoint={position:[...this.lastPosition],velocity:active.player.velocity.toArray(),yaw:active.player.yaw,pitch:active.player.pitch};
+    this.lastPosition=position;void this.cross(portal,active,checkpoint,{physical:true});return;
+   }
+   const record=this.previewRecords.get(portal.id);
+   if(!portal.enabled||portal.view?.enabled===false)continue;
+   const distance=Math.hypot(...portalLocalPoint(portal,position));
+   if(distance<(portal.view?.maxDistance??30)){const r=previewRank(portal,active.player,distance);attention.push(r);if(!record||record.retryAt&&record.retryAt<performance.now())demand.push(r);}
+  }
+  this.lastPosition=position;
+  if(![...this.nestedLoads.values()].some(n=>!n.retryAt))this.previewQueue.update(demand,p=>this.preview(p),attention);
+ }
  resolveNestedPreview({outerCandidate,source,visibilityFrame}){
   if(!this.enabled||this.pending||this.disposed||this.cache.disposed)return null;
   const worldId=outerCandidate?.loaded?.identity?.worldId??outerCandidate?.identity?.worldId??outerCandidate?.descriptor?.worldId,route=this.route(worldId,source.id);
@@ -131,6 +149,7 @@ export class PublicPortalRuntime{
   // Full structural fingerprints run only on first use/visibility re-entry or a
   // lifecycle change. Stale residents recover through the same protected lease
   // as normal travel; repeated visible frames share the one preparation.
+  if(!record&&(this.previewQueue.busy||this.previewQueue.foreground||this.previewQueue.waiting.size||[...this.nestedLoads.values()].some(n=>!n.retryAt)))return null;
   const epoch=this.epoch,generation=this.host.generation,active=this.host.active,request={cache,epoch,generation,active};this.nestedLoads.set(route.destinationWorldId,request);
   const current=()=>this.enabled&&!this.disposed&&this.epoch===epoch&&this.cache===cache&&!cache.disposed&&this.host.generation===generation&&this.host.active===active;
   request.promise=(async()=>{let lease;try{
@@ -146,6 +165,7 @@ export class PublicPortalRuntime{
  getPeerLayer(){return null;}avatarRepresentations(){return [];}recover(){return Promise.reject(Error('Published single-player travel has no network recovery'));}
  diagnostics(){return {mode:'published',activeWorldId:this.host.active?.identity.worldId,pending:this.pending,enabled:this.enabled,crossings:this.crossings,cacheCount:this.cache.records.size,previewCount:[...this.previewRecords.values()].filter(r=>r.record).length,errors:[...this.errors].map(([portalId,error])=>({portalId,error})),portals:[...this.views.entries].map(([id,e])=>({id,state:e.aperture.userData.portalViewState,worldId:this.previewRecords.get(id)?.worldId}))};}
  disconnect(){
+  this.previewQueue.reset();this.abortAdmissions.abort();this.abortAdmissions=new AbortController();this.admissions=new WeakMap();
   this.meld?.cancel();this.onBeforeDisconnect?.();
   if(this.pending)this.host.generation++;this.epoch++;this.transport.connectionEpoch++;this.enabled=false;this.pending=false;this.config=null;this.restoreHooks();
   if(this.activeRecord){this.activeRecord.viewEntries=this.views.park();this.activeRecord=null;}else this.views.clear();
