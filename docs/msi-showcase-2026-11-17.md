@@ -1,0 +1,21 @@
+# Showcase: sharpness without a frame cap
+
+Use **Menu (M) → Quality preset**. **Showcase · smooth 1080p** limits the scene to 2,073,600 pixels and the portal image to a 768 px long edge. **Showcase · maximum 1440p** uses up to 3,686,400 scene pixels and a 1024 px portal image. Both preserve the display's aspect ratio; neither deliberately renders beyond the device's pixel count. These are opt-in. Standard, Auto native, Performance, Capture, and saved settings remain available.
+
+On a build containing this change, `?quality=showcase1080` and `?quality=showcase` explicitly select the respective options on launch. Neither link saves over the user's chosen preferences. The MSI standalone preview contains the same four pinned public worlds. Launch `Play-Fred-1080p.cmd` or `Play-Fred-1440p.cmd` in its folder; a browser opens on that PC only. Close the console to stop that instance. The ordinary public player was not replaced.
+
+## What changes at runtime
+
+Start at full detail within the selected limit. An observed stable 32 Hz session does not have to shed pixels to chase an unproven 60 Hz. When the scene demonstrates faster pacing, the adaptive controller can use a 60 FPS budget. Neither 30 nor 60 is a frame limiter. When fps stays slow, test lower portal resolution, then (if needed) screen resolution. Keep a reduction only if it improves FPS by at least 8% against both the starting and restored settings on a reasonably stable workload. Hidden windows or changed viewports invalidate comparisons. Scene geometry, textures, lighting and effects are not reduced by this feature.
+
+The GLB reader still inspects every required component, index and transformed position, on the same input bytes. It computes stable byte strides and offsets outside the inner loops and avoids allocating a temporary array for each transformed vertex. The pinned vendor source and its hash are unchanged. Both the worker and the renderer use this adaptation. The player's provenance separately records the scan transform and checks the emitted chunks. Decoded meshes, materials, textures and placement checks still run.
+
+## Qualification
+
+MSI Intel Arc, hardware Edge WebGL2/D3D11, 2560 × 1440 viewport at DPR 1 (not the physical monitor resolution), unchanged published Warehouse/Dock, normal forward movement and keyboard turning. Fresh browsers, persistent OS/driver caches; only one qualification browser at a time. Sizes are actual WebGL buffers, not window sizes. The Windows remote adapter reported 32 Hz; the GPU used for the browser was Intel Arc. These are application/browser frame intervals, not physically scanned-out frames, and they do not establish 60 FPS on the laptop display.
+
+In three qualification runs per mode before a diagnostic-order correction, average Dock turning rates were 31.27–32.00 FPS at 1080p and 31.27–32.00 FPS at 1440p. Warehouse turns on either setting were around 31 FPS. The previous auto-native comparison entered at 1333 × 750 and also measured about 31–32 FPS in the Dock. The maximum mode therefore rendered about 3.69× as many scene pixels at that checkpoint without a corresponding increase in sustained FPS. Fresh profiles and system scheduling vary. Occasional noticeable stalls remain.
+
+An isolated Node test on hpubuntu compared both inspectors against all four actual pinned Dock models. They produced identical returned inspection results; across eight measured samples per implementation after warmup, total raw inspection time across the four assets fell from a median of 217.4 ms to 18.9 ms. **This is not an 11× increase in game FPS.** The tests also cover packed/strided/unaligned data, all supported unsigned index widths, NaNs, infinities, bad indices, transformed bounds, collapsed geometry, and cyclic graphs.
+
+Reproduce the focused tests with `npm run test:showcase`, the graphics suite with `npm run test:runtime-graphics` and published world checks with `npm run test:published-worlds`. Local evidence contains individual raw intervals, world digests and errors. To make a private preview from already-approved public content, build and run `node tools/assemble-showcase-preview.mjs <public-root> <public-manifest> <manifest-sha256> <absolute-dist> <new-absolute-preview-directory>`. Never point the preview at an operator checkout; the packaged server serves only hash-listed static files on loopback.

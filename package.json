@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5189",
+    "test:showcase": "node --test test/showcase-scan.mjs test/graphics-quality.mjs test/output-surface-transform.mjs test/stack-safe-world-walk.mjs",
     "test:loader-lod-spawn": "node --test test/gltf-input-views.mjs test/presentation-lod.mjs test/avatar-lod-assets.mjs test/avatar-geometry-lod.mjs test/local-spawn-allocation.mjs test/owner-world-authority.mjs test/ground-collider-hierarchy.mjs test/texture-submit-lifetime.mjs test/native-island-runtime.mjs",
     "test:lod:browser": "node test/presentation-lod-browser.mjs && node test/presentation-lod-native-browser.mjs",
     "test:owner-integration": "node --test --test-concurrency=4 test/eyes-consent-server.mjs test/owner-browser-roundtrip.mjs test/owner-motion-correction.mjs test/owner-runtime-upgrade.mjs test/owner-world-revision.mjs test/owner-world-runtime.mjs test/player-gaze-owner.mjs test/owner-stair-clearance.mjs",

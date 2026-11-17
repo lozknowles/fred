@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {optimizeGlbScans} from './glb-accessor-scan.mjs';
 // Local build adaptation of the pinned contract. No validation is removed:
 // push entries one at a time, in exactly the original order. A wide terrain
 // array must not become a single JS call with tens of thousands of arguments.
@@ -18,6 +19,7 @@ export function stackSafeWorldWalk(){
   const end=source.indexOf('\n}',start);
   if(start<0||end<0||source.slice(start,end).split(before).length!==2||source.split(before).length!==2)throw Error('Review world validator adaptation after contract change');
   let code=source.replaceAll('\r\n','\n').replace(before,after);
+  code=optimizeGlbScans(code);
   for(const [from,to] of inspections){
    if(code.split(from).length!==2)throw Error('Review pinned published GLB inspection sites');
    code=code.replace(from,to);

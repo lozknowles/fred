@@ -8,12 +8,13 @@ const element=(tag,text,className)=>{const node=document.createElement(tag);if(t
 const numeric=value=>Number(value);
 /** Public runtime controls. Timing comes only from the existing game callback. */
 export class GraphicsPanel {
- constructor({app,captureQuality=false,onOpen=()=>{},onClose=()=>{},canOpen=()=>true,storage}={}){
+ constructor({app,captureQuality=false,showcaseQuality=false,onOpen=()=>{},onClose=()=>{},canOpen=()=>true,storage}={}){
   this.app=app;this.onOpen=onOpen;this.onClose=onClose;this.canOpen=canOpen;this.disposed=false;this.contextLost=false;this.nextRefresh=0;this.appliedRevision=-1;
   try{this.storage=storage??window.localStorage;}catch{this.storage=null;}
   let preferences={...GRAPHICS_DEFAULTS};
   try{const saved=JSON.parse(this.storage?.getItem(STORAGE)??'null');if(saved?.version===1)preferences=validateGraphicsPreferences(saved.preferences);}catch{}
   if(captureQuality)preferences={...GRAPHICS_DEFAULTS,...GRAPHICS_PRESETS.capture};
+  else if(showcaseQuality==='showcase'||showcaseQuality==='showcase1080')preferences={...GRAPHICS_PRESETS[showcaseQuality]};
   this.model=new GraphicsQualityModel(preferences);this.updateViewport();this.experiments=new GraphicsExperiments(app);
   this.timeOfDay=null;this.build();this.apply();this.refresh();
   this.keydown=event=>{if(!isGameMenuShortcut(event,document.activeElement)||this.otherDialogOpen()||!this.open&&!this.canOpen())return;event.preventDefault();if(this.open)this.close();else this.show();};
@@ -40,8 +41,8 @@ export class GraphicsPanel {
    for(const [value,text]of options){const option=element('option',text);option.value=String(value);if(value==='custom')option.disabled=true;input.append(option);}
    const help=element('small',description);field.append(title,input,help);input.addEventListener('change',()=>onChange(input.value));this.form.append(field);this.controls[key]=input;return input;
   };
-  select('preset','Quality preset',[['autoNative','Auto native · target 30 FPS'],['performance','Performance'],['standard','Standard'],['capture','High detail'],['custom','Custom']],'Choose a starting point; individual controls remain available.',value=>this.setPreset(value));
-  select('mode','Frame-rate mode',[['manual','Manual quality'],['target30','Target 30 FPS'],['native30','Auto native · target 30 FPS']],'Auto native starts near 1 million pixels and tests small increases toward your device’s native resolution when frame pacing allows. It cannot guarantee 30 FPS.',value=>this.setPreferences({mode:value}));
+  select('preset','Quality preset',[['showcase1080','Showcase · smooth 1080p'],['showcase','Showcase · maximum 1440p'],['autoNative','Auto native · target 30 FPS'],['performance','Performance'],['standard','Standard'],['capture','High detail'],['custom','Custom']],'Showcase starts at native detail, up to the selected limit, and tests whether reducing detail really improves motion.',value=>this.setPreset(value));
+  select('mode','Frame-rate mode',[['manual','Manual quality'],['target30','Target 30 FPS'],['native30','Auto native · target 30 FPS'],['showcase','Showcase · adaptive 30 / 60 FPS']],'Showcase starts at the selected native limit. It aims for 60 FPS when fast frames are observed, and retains reductions only when tested. Neither target is guaranteed.',value=>this.setPreferences({mode:value}));
   select('maxOutputPixels','Screen resolution limit',[[500000,'Performance · 0.5 million pixels'],[921600,'720p limit · 1280 × 720 pixels'],[1000000,'Standard · 1 million pixels'],[1500000,'Detailed · 1.5 million pixels'],[2073600,'1080p limit · 1920 × 1080 pixels'],[2100000,'High · 2.1 million pixels'],[3686400,'1440p limit · 2560 × 1440 pixels']],'Maximum pixel count; keeps your screen’s shape. Actual resolution is shown above and may be lower with adaptive quality.',value=>this.setPreferences({maxOutputPixels:numeric(value)}));
   select('timeOfDay','Current world time',[['world','World default'],[6,'Dawn · 06:00'],[9,'Morning · 09:00'],[12,'Noon · 12:00'],[15,'Afternoon · 15:00'],[18,'Dusk · 18:00'],[21,'Evening · 21:00'],[0,'Night · 00:00']],'Resets when you travel. Scanned rooms keep their captured lighting.',value=>{this.timeOfDay=value==='world'?null:numeric(value);this.refresh();});
   select('portalLongEdge','Portal detail',[[256,'Low · 256 pixels'],[384,'Medium · 384 pixels'],[512,'Standard · 512 pixels'],[768,'Detailed · 768 pixels'],[1024,'High · 1024 pixels']],'Maximum long edge of the portal image. Higher settings retain finer detail.',value=>this.setPreferences({portalLongEdge:numeric(value)}));
@@ -70,9 +71,9 @@ export class GraphicsPanel {
  setPreset(name){if(!GRAPHICS_PRESETS[name])return this.snapshot();return this.setPreferences({...GRAPHICS_DEFAULTS,...GRAPHICS_PRESETS[name]});}
  updateViewport(){this.model.setViewport(window.innerWidth,window.innerHeight,window.devicePixelRatio||1);}
  apply(){
-  if(this.disposed||this.contextLost)return;const state=this.model.snapshot();if(state.revision===this.appliedRevision)return;
+  if(this.disposed||this.contextLost)return;const state=this.model.snapshot();
   const engine=this.app.engine,views=this.app.portals.views;
-  const native=state.settings.mode==='native30',sizingChanged=!!engine.nativeResolution!==native;engine.nativeResolution=native;
+  const native=['native30','showcase'].includes(state.settings.mode),sizingChanged=!!engine.nativeResolution!==native;if(state.revision===this.appliedRevision&&!sizingChanged)return;engine.nativeResolution=native;
   if(sizingChanged||engine.maxOutputPixels!==state.effective.maxOutputPixels){engine.maxOutputPixels=state.effective.maxOutputPixels;engine.resize();this.app.post?.taau?.resetHistory();}
   views.maxLongEdge=state.effective.portalLongEdge;
   // Forked preview views must inherit the current preference too.

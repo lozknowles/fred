@@ -84,7 +84,8 @@ async function init(){
  const engine=selected.value,isWebGL=selected.backend==='webgl2';
  openingProgress.advance('renderer-ready');
  let openingLoading=false,pendingOpeningReady=null,openingTargetWorldId=null,openingTargetDigest=null,openingExpectedGeneration=null;
- const captureQuality=new URLSearchParams(location.search).get('quality')==='capture';engine.maxOutputPixels=captureQuality?2100000:1000000;engine.resize();
+ const requestedQuality=new URLSearchParams(location.search).get('quality'),captureQuality=requestedQuality==='capture',showcaseQuality=['showcase','showcase1080'].includes(requestedQuality)?requestedQuality:null;
+ engine.nativeResolution=!!showcaseQuality;engine.maxOutputPixels=showcaseQuality==='showcase'?3686400:showcaseQuality==='showcase1080'?2073600:captureQuality?2100000:1000000;engine.resize();
  let playerEyes=null,eyeInputContext=null,graphics=null;
  let media,mediaContext=null,objectAccess,accessPanel,controlsHelp,worldWelcome,welcomeView,activeComputerId=null,interactionPending=false,interactionContext=null;
  const input=new Input(engine.canvas,{touchRoot:touchLayer,keyboardLookBlocked:()=>graphics?.open||playerEyes?.panel.open||terminal.open||retro.active||!!media?.controlsOpen||controlsHelp?.open||accessPanel?.root.open});
@@ -245,11 +246,11 @@ async function init(){
  }
 
  let graphicsInputContext=null;
- graphics=new GraphicsPanel({app,captureQuality,canOpen:()=>!atSnooker()&&!!host.active&&!portals.pending&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!avatarChooser.dialog.open&&!playerEyes?.panel.open,
+ graphics=new GraphicsPanel({app,captureQuality,showcaseQuality,canOpen:()=>!atSnooker()&&!!host.active&&!portals.pending&&!terminal.open&&!retro.active&&!media?.controlsOpen&&!interactionPending&&!controlsHelp.open&&!accessPanel.root.open&&!avatarChooser.dialog.open&&!playerEyes?.panel.open,
   onOpen:()=>{playerEyes?.ownView('Graphics menu opened');graphicsInputContext=interactionState();input.suspend();},
   onClose:()=>{resumeUI(graphicsInputContext);graphicsInputContext=null;}});app.graphics=graphics;
  const sessionStatus=document.querySelector('#session-status');
- host.beforeActivate=async()=>{host.active?.defenderPlayer?.pause();host.active?.snooker?.leave();frameDiagnostics.read();graphics?.worldChanging();playerEyes?.panel.setOpen(false);playerEyes?.ownView('Viewer world is changing');media?.exit();worldWelcome?.reset();objectAccess.invalidate();controlsHelp.close();accessPanel.root.open=false;accessPanel.render(null);if(retro.active)retro.clear();document.querySelector('#apply-update').disabled=true;document.querySelector('#update-status').textContent='';app.session?.disconnect();if(terminal.open)terminal.close();};
+ host.beforeActivate=async()=>{frameDiagnostics.read();host.active?.defenderPlayer?.pause();host.active?.snooker?.leave();graphics?.worldChanging();playerEyes?.panel.setOpen(false);playerEyes?.ownView('Viewer world is changing');media?.exit();worldWelcome?.reset();objectAccess.invalidate();controlsHelp.close();accessPanel.root.open=false;accessPanel.render(null);if(retro.active)retro.clear();document.querySelector('#apply-update').disabled=true;document.querySelector('#update-status').textContent='';app.session?.disconnect();if(terminal.open)terminal.close();};
  const makeSession=()=>new RepositorySession(host,{trustedOwners:new Set([document.querySelector('#session-url').value.trim()]),onStatus:value=>sessionStatus.textContent=value});
  document.querySelector('#session-identity').onclick=()=>void(async()=>{const session=app.session??makeSession();document.querySelector('#public-identity').textContent=JSON.stringify(await session.publicIdentity(),null,2);})().catch(error=>sessionStatus.textContent=error.message);
  document.querySelector('#session-connect').onclick=()=>void(async()=>{const file=document.querySelector('#admission').files[0];if(!file||file.size>100000)throw Error('Select an operator admission JSON under 100 KB.');const proof=JSON.parse(await file.text());if(portals.mode==='published')portals.disconnect();app.session?.disconnect();app.session=makeSession();await app.session.connect(proof);})().catch(error=>sessionStatus.textContent=error.message);

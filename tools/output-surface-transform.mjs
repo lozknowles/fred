@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {optimizeGlbScans} from './glb-accessor-scan.mjs';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -45,7 +46,15 @@ export function applyOutputSurfaceAnchors(original){
  return {code:text,manifest:{integration:'bounded-opt-in',upstreamSourceUnmodified:true,inputSha256,outputSha256:sha(text),normalization:'UTF-8 LF',edits,limitations:['Only explicitly registered ordinary render targets use this output policy; default, XR and unregistered offscreen targets retain their existing behavior.','WebGLSunsetOutput owns Spark final-output handling after its normal object callback. Registration alone changes neither scene detail nor rendering resolution.']}};
 }
 
-export const outputSurfaceTransformVersion='1.0.0';
+// Keep the independently qualified six render-state edits and their original
+// hash intact, then separately record the CPU-only scan adaptation.
+function playerDerivative(input){
+ const base=patchOutputSurface(input),code=optimizeGlbScans(base.code);
+ return {code,manifest:{...base.manifest,outputSha256:sha(code),edits:[...base.manifest.edits,'equivalent GLB accessor scans']}};
+}
+const scannerPath='tools/glb-accessor-scan.mjs';
+const scannerHash=()=>sha(fs.readFileSync(new URL('./glb-accessor-scan.mjs',import.meta.url)));
+export const outputSurfaceTransformVersion='1.1.0';
 export const outputSurfaceManifestName='output-surface-derivative.json';
 const vendorRelative='src/world-runtime/vendor/world-engine-contract.js';
 const transformRelative='tools/output-surface-transform.mjs';
@@ -62,7 +71,7 @@ export function createOutputSurfaceTransform({root=moduleRoot}={}){
    const actual=normalizedId(id);
    if(actual.split('?')[0]!==vendorId)return null;
    if(actual!==vendorId)throw Error('Output-surface vendor module id must match exactly');
-   const result=patchOutputSurface(source);derivative=result.manifest;
+   const result=playerDerivative(source);derivative=result.manifest;
    return {code:result.code,map:null};
   },
   generateBundle:{order:'post',handler(_options,bundle){
@@ -77,6 +86,7 @@ export function createOutputSurfaceTransform({root=moduleRoot}={}){
    const manifest={schema:'elsemesh.output-surface-derivative/1',version:outputSurfaceTransformVersion,integration:derivative.integration,limitations:derivative.limitations,
     source:{path:vendorRelative,normalization:'UTF-8 LF',sha256:inputSha256,upstreamBytesUnmodified:true},
     transform:{path:transformRelative,version:outputSurfaceTransformVersion,sha256:transformHash(),edits:derivative.edits},
+    geometryScanner:{path:scannerPath,sha256:scannerHash()},
     transformedModule:{sha256:derivative.outputSha256,chunks:vendorChunks},finalChunks,
     scope:'The source hash identifies normalized unchanged upstream bytes. Transform, derivative module and final chunk hashes identify distinct downstream artifacts.'};
    this.emitFile({type:'asset',fileName:outputSurfaceManifestName,source:JSON.stringify(manifest,null,2)+'\n'});
@@ -87,7 +97,8 @@ export function createOutputSurfaceTransform({root=moduleRoot}={}){
 async function regularBytes(file,maxBytes){const info=await fsp.lstat(file);if(!info.isFile()||info.isSymbolicLink()||info.size>maxBytes)throw Error('Invalid output-surface provenance file');return fsp.readFile(file);}
 export async function packageOutputSurfaceDerivative(build,output){
  const bytes=await regularBytes(path.join(build,outputSurfaceManifestName),128*1024),manifest=JSON.parse(bytes.toString('utf8'));
- const expected=patchOutputSurface(await fsp.readFile(path.join(moduleRoot,vendorRelative),'utf8')).manifest;
+ const expected=playerDerivative(await fsp.readFile(path.join(moduleRoot,vendorRelative),'utf8')).manifest;
+ if(manifest.geometryScanner?.path!==scannerPath||manifest.geometryScanner.sha256!==scannerHash())throw Error('Geometry scan provenance mismatch');
  if(manifest.schema!=='elsemesh.output-surface-derivative/1'||manifest.version!==outputSurfaceTransformVersion||manifest.source?.path!==vendorRelative||manifest.source.normalization!=='UTF-8 LF'||manifest.source.sha256!==inputSha256||manifest.source.upstreamBytesUnmodified!==true||manifest.transform?.path!==transformRelative||manifest.transform.version!==outputSurfaceTransformVersion||manifest.transform.sha256!==transformHash()||JSON.stringify(manifest.transform.edits)!==JSON.stringify(expected.edits)||manifest.transformedModule?.sha256!==expected.outputSha256)throw Error('Output-surface derivative source/transform provenance mismatch');
  const chunks=Object.entries(manifest.finalChunks??{});
  if(!chunks.length||chunks.length>256||!Array.isArray(manifest.transformedModule.chunks)||manifest.transformedModule.chunks.length!==1||!Object.hasOwn(manifest.finalChunks,manifest.transformedModule.chunks[0]))throw Error('Invalid output-surface final chunk manifest');

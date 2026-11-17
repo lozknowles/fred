@@ -9,6 +9,7 @@ import {inputSha256,patchOutputSurface,applyOutputSurfaceAnchors,createOutputSur
 const root=fileURLToPath(new URL('..',import.meta.url)),vendor=path.join(root,'src/world-runtime/vendor/world-engine-contract.js');
 const original=await fs.readFile(vendor,'utf8'),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const qualifiedModuleSha='037f6dea42d7d076530362fed49dc96d222793e04e97c22c5cff176a3b8d0fd7';
+const qualifiedPlayerSha='da0f35b41687aa8d471ac5ca9136bf000c68d6eec48145f95601326f1004467b';
 const anchors=[
  ['renderer-owned registration','    this.isWebGLRenderer = true;'],
  ['unlit colors','function getUnlitUniformColorSpace(renderer) {\n  const currentRenderTarget = renderer.getRenderTarget();'],
@@ -41,14 +42,15 @@ function emittedManifest(){
  assert.equal(plugin.transform(original,path.join(root,'other/vendor/world-engine-contract.js')),null);
  assert.throws(()=>plugin.transform(original,id+'?raw'),/module id must match exactly/);
  assert.throws(()=>plugin.generateBundle.handler.call({emitFile(){}},{},{}),/did not run/);
- assert.equal(sha(plugin.transform(original,id).code),qualifiedModuleSha);
+ assert.equal(sha(plugin.transform(original,id).code),qualifiedPlayerSha);
  let emitted;const bundle={'assets/contract-12345678.js':{type:'chunk',code:'export const policy=true;\n',modules:{[id]:{}}},'assets/main-12345678.js':{type:'chunk',code:'import "./contract-12345678.js";\n',modules:{}}};
  plugin.generateBundle.handler.call({emitFile:value=>{emitted=value;}},{},bundle);
  return {plugin,id,bundle,emitted,manifest:JSON.parse(emitted.source)};
 }
 
 test('plugin uses the exact module id and emits separate final chunk/module/transform provenance',()=>{
- const {plugin,id,bundle,emitted,manifest}=emittedManifest();assert.equal(emitted.fileName,outputSurfaceManifestName);assert.equal(manifest.source.sha256,inputSha256);assert.equal(manifest.transformedModule.sha256,qualifiedModuleSha);assert.match(manifest.transform.sha256,/^[a-f0-9]{64}$/);assert.deepEqual(manifest.transformedModule.chunks,['assets/contract-12345678.js']);
+ const {plugin,id,bundle,emitted,manifest}=emittedManifest();assert.equal(emitted.fileName,outputSurfaceManifestName);assert.equal(manifest.source.sha256,inputSha256);assert.equal(manifest.transformedModule.sha256,qualifiedPlayerSha);assert.match(manifest.transform.sha256,/^[a-f0-9]{64}$/);assert.deepEqual(manifest.transformedModule.chunks,['assets/contract-12345678.js']);
+ assert.equal(manifest.geometryScanner.path,'tools/glb-accessor-scan.mjs');assert.match(manifest.geometryScanner.sha256,/^[a-f0-9]{64}$/);
  for(const [name,item]of Object.entries(bundle))assert.equal(manifest.finalChunks[name],sha(item.code));
  assert.throws(()=>plugin.generateBundle.handler.call({emitFile(){}},{},{only:{type:'chunk',code:'',modules:{}}}),/exactly one transformed vendor chunk/);
  assert.throws(()=>plugin.generateBundle.handler.call({emitFile(){}},{},{...bundle,other:{type:'chunk',code:'',modules:{[id]:{}}}}),/exactly one transformed vendor chunk/);
@@ -66,7 +68,7 @@ async function fixture(t){
 }
 
 test('publication packaging explicitly copies and byte-preserves derivative manifest and chunk closure',async t=>{
- const {build,output,emitted,manifest}=await fixture(t),metadata=await packageOutputSurfaceDerivative(build,output);assert.equal(metadata.manifest,outputSurfaceManifestName);assert.equal(metadata.sha256,sha(emitted.source));assert.equal(metadata.upstreamSourceSha256,inputSha256);assert.equal(metadata.transformedModuleSha256,qualifiedModuleSha);assert.deepEqual(metadata.finalChunks,manifest.finalChunks);assert.equal(await fs.readFile(path.join(output,outputSurfaceManifestName),'utf8'),emitted.source);assert.deepEqual(await packageOutputSurfaceDerivative(build,output),metadata);
+ const {build,output,emitted,manifest}=await fixture(t),metadata=await packageOutputSurfaceDerivative(build,output);assert.equal(metadata.manifest,outputSurfaceManifestName);assert.equal(metadata.sha256,sha(emitted.source));assert.equal(metadata.upstreamSourceSha256,inputSha256);assert.equal(metadata.transformedModuleSha256,qualifiedPlayerSha);assert.deepEqual(metadata.finalChunks,manifest.finalChunks);assert.equal(await fs.readFile(path.join(output,outputSurfaceManifestName),'utf8'),emitted.source);assert.deepEqual(await packageOutputSurfaceDerivative(build,output),metadata);
  const script=await fs.readFile(path.join(root,'tools/package-published-worlds.mjs'),'utf8');assert.match(script,/await packageOutputSurfaceDerivative\(build,output\)/);const publicationFields=script.match(/schema:'elsemesh\.publication\/1',([^}]+)/)?.[1];
  assert.ok(publicationFields?.split(',').includes('outputSurfaceDerivative'),'publication carries the verified build derivative');
 });

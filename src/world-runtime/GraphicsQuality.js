@@ -6,11 +6,13 @@ export const GRAPHICS_PRESETS = Object.freeze({
  performance: Object.freeze({...GRAPHICS_DEFAULTS, maxOutputPixels: 500000, portalLongEdge: 256}),
  standard: GRAPHICS_DEFAULTS,
  autoNative: Object.freeze({...GRAPHICS_DEFAULTS, mode: 'native30', maxOutputPixels: 3686400, minimumScale: .5}),
+ showcase: Object.freeze({...GRAPHICS_DEFAULTS, mode:'showcase', maxOutputPixels:3686400, portalLongEdge:1024}),
+ showcase1080: Object.freeze({...GRAPHICS_DEFAULTS, mode:'showcase', maxOutputPixels:2073600, portalLongEdge:768}),
  capture: Object.freeze({...GRAPHICS_DEFAULTS, maxOutputPixels: 2100000, portalLongEdge: 1024})
 });
 
 const OPTIONS = Object.freeze({
- mode: ['manual', 'target30', 'native30'],
+ mode: ['manual', 'target30', 'native30', 'showcase'],
  maxOutputPixels: [500000, 921600, 1000000, 1500000, 2073600, 2100000, 3686400],
  portalLongEdge: [256, 384, 512, 768, 1024],
  minimumScale: [.5, .7, .85]
@@ -78,7 +80,7 @@ export class GraphicsQualityModel {
  }
 
  _ceiling() {
-  return this.settings.mode === 'native30' ? Math.min(3686400, this.settings.maxOutputPixels, this.nativePixels) : this.settings.maxOutputPixels;
+  return ['native30','showcase'].includes(this.settings.mode) ? Math.min(3686400, this.settings.maxOutputPixels, this.nativePixels) : this.settings.maxOutputPixels;
  }
 
  _initialScale() {
@@ -95,6 +97,12 @@ export class GraphicsQualityModel {
   this.viewportSignature = signature;
   const oldPixels = this.nativeTrial ? this._ceiling() * this.nativeTrial.before ** 2 : this.effective.maxOutputPixels;
   this.nativePixels = pixels;
+  if (this.settings.mode === 'showcase') {
+   // A resize changes the workload. Discard any old comparison and start at
+   // the new device ceiling, not a supersampled canvas or a stale trial.
+   this.scale = this.portalScale = 1;
+   this._publishEffective(); this._resetPolicy(); return;
+  }
   if (this.settings.mode !== 'native30') return;
   this.scale = Math.min(1, Math.sqrt(oldPixels / this._ceiling()));
   this._publishEffective();
@@ -110,6 +118,7 @@ export class GraphicsQualityModel {
   this.cooldownUntil = 0;
   this.probe = null;
   this.nativeTrial = null;
+  this.highCadence = false;
   this.blocked = {portal: false, output: false};
   this.blockedReasons = {portal: null, output: null};
   this.decisions = [];
@@ -269,6 +278,12 @@ export class GraphicsQualityModel {
 
  _adapt(at) {
   const fps = this.stats.fps;
+  // Do not infer 60 Hz from the monitor name (remote sessions can pace at 32).
+  // Only chase 60 after the running scene has actually demonstrated fast frames.
+  // In either case the target is an adaptation budget, never a frame limiter.
+  if(this.settings.mode==='showcase' && this.stats.samples>=45 && fps>=48 && this.stats.p95Ms<=23) this.highCadence=true;
+  const fast=this.settings.mode==='showcase'&&this.highCadence;
+  const target=fast?60:30;
   if (this.probe) {
    const probe = this.probe;
    this.status = probe.phase === 'candidate' ? this._testingStatus(probe.kind) : 'Checking previous detail';
@@ -305,7 +320,7 @@ export class GraphicsQualityModel {
    return;
   }
 
-  if (fps > 36) {
+  if (fast ? fps >= 59 : fps > 36) {
    this.slowSince = null;
    this.fastSince ??= at;
    if (at - this.fastSince >= RECOVERY_MS && at >= this.cooldownUntil) {
@@ -327,7 +342,7 @@ export class GraphicsQualityModel {
   }
   this.fastSince = null;
   // The tiny epsilon prevents floating-point summation from treating exact30 as slow.
-  if (fps >= 30 - 1e-6) {
+  if (fps >= target * (fast ? .98 : 1) - 1e-6) {
    this.slowSince = null;
    this.status = 'Target reached';
    return;
@@ -362,8 +377,9 @@ export class GraphicsQualityModel {
  }
 
  _failureStatus(kind) {
-  return this.blockedReasons[kind] === 'unstable' ? '30 FPS target not met; scene workload varied' :
-   '30 FPS target not met; resolution changes did not improve frame pacing';
+  const target=this.settings.mode==='showcase'&&this.highCadence?60:30;
+  return target+(this.blockedReasons[kind] === 'unstable' ? ' FPS target not met; scene workload varied' :
+   ' FPS target not met; resolution changes did not improve frame pacing');
  }
 
  snapshot() {
@@ -372,7 +388,7 @@ export class GraphicsQualityModel {
    effective: {...this.effective}, revision: this.revision,
    bufferedSamples: this.intervals.length,
    adaptation: {
-    targetFps: 30, nativeCeilingPixels: this._ceiling(), nativeTrial: this.nativeTrial ? {...this.nativeTrial} : null, probe: this.probe ? {...this.probe} : null,
+    targetFps: this.settings.mode==='showcase'&&this.highCadence?60:30, nativeCeilingPixels: this._ceiling(), nativeTrial: this.nativeTrial ? {...this.nativeTrial} : null, probe: this.probe ? {...this.probe} : null,
     blocked: {...this.blocked}, blockedReasons: {...this.blockedReasons}, decisions: this.decisions.map(value => ({...value})),
     bufferLimit: BUFFER_LIMIT
    }
