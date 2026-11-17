@@ -14,7 +14,7 @@ export class PeriodComputer {
   this.button=(text,fn)=>{const n=el('button',text,this.tools);n.type='button';n.onclick=fn;return n;};
   this.leave=this.button('Leave computer',()=>this.close());
   this.status=el('p','',shell);this.status.className='fred-period-status';this.status.setAttribute('role','status');
-  el('p',kind==='sun'?'Boot NetBSD/SPARC to use a disposable Sun workstation. End OS session discards your changes.':'Click the emulated screen to type. These computers have no FRED login. Use Leave computer above to return; an emulator may capture Escape. Switching away stops the guest; reopen it to restart.',shell);
+  el('p',kind==='sun'?'Boot NetBSD/SPARC to use a disposable Sun workstation. End OS session discards your changes.':'Click the emulated screen to type. These computers do not need a game login. Use Leave computer above to return; an emulator may capture Escape. Switching away stops the guest; reopen it to restart.',shell);
   if(kind==='bbc'){
    const detail=el('details',null,shell);el('summary','Edit the BBC BASIC program',detail);
    this.program=el('textarea',null,detail);this.program.setAttribute('aria-label','BBC BASIC program');this.program.rows=7;this.program.spellcheck=false;

@@ -8,6 +8,11 @@ async function put(n,source,expectedHash){if(!guard(n))throw Error('Unexpected p
 for(const [n,d]of Object.entries(prev))await put(n,old,d);
 for(const n of ['index.html','worlds.html','output-surface-derivative.json'])await put(n,dist);
 for(const f of await fs.readdir(path.join(dist,'assets'))){if(!/^[A-Za-z0-9_.-]+\.(js|css|mp3|ogg|png|svg|webp|woff2?)$/.test(f))throw Error('Unexpected build asset: '+f);await put('assets/'+f,dist);}
+// Keep all host/world-specific credits and legal notices. Replace only the
+// old presentation headings if this approved base predates the public rename.
+const cp=path.join(player,'credits.html'),before=await fs.readFile(cp,'utf8');
+const branded=before.replace("<title>Loz's Warehouse Island · Credits</title>","<title>Work in Progress · Credits and licences</title>").replace("<h1>Loz's Warehouse Island</h1>","<h1>Work in Progress</h1>");
+if(branded!==before){await fs.writeFile(cp,branded);files['credits.html']=sha(Buffer.from(branded));}
 await packageOutputSurfaceDerivative(dist,player);
 await fs.writeFile(path.join(target,'preview-manifest.json'),JSON.stringify({files}));
 await fs.copyFile(new URL('./serve-showcase-preview.mjs',import.meta.url),path.join(target,'serve.mjs'));

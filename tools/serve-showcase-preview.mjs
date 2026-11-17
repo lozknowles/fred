@@ -19,5 +19,5 @@ const server=http.createServer(async(req,res)=>{try{
 });
 await new Promise((r,j)=>{server.once('error',j);server.listen(0,'127.0.0.1',r);});
 const url='http://127.0.0.1:'+server.address().port+'/?quality='+(args.includes('--1440')?'showcase':'showcase1080');
-console.log(url);console.log('Fred Showcase - press M to change quality. Close this console to stop the preview.');
+console.log(url);console.log('Work in Progress Showcase - press M to change quality. Close this console to stop the preview.');
 if(args.includes('--open')&&process.platform==='win32')spawn('rundll32.exe',['url.dll,FileProtocolHandler',url],{stdio:'ignore',windowsHide:true}).unref();
