@@ -304,6 +304,31 @@ function packedFloatAttribute(attribute,size,count){
  return attribute?.array instanceof Float32Array&&attribute.itemSize===size&&!attribute.normalized&&
   !attribute.isInterleavedBufferAttribute&&attribute.array.length>=count*size;
 }
+const MEDIA_PLANT_RECORD_LIMIT=8192;
+function plantRecordKey(matrixWords,plantWords,recordWords,index){
+ let hash=Math.imul(2166136261^matrixWords[index*16+12],16777619);
+ hash=Math.imul(hash^matrixWords[index*16+13],16777619);hash=Math.imul(hash^matrixWords[index*16+14],16777619);
+ hash=Math.imul(hash^plantWords[index*4+3],16777619);return Math.imul(hash^recordWords[index*4+2],16777619);
+}
+function matchingPlantRecord(pool,key,matrices,plants,records,index,generation){
+ const bucket=pool?.buckets.get(key);if(!bucket)return null;
+ candidate:for(const entry of bucket){
+  if(entry.generation===generation)continue; // duplicate records keep separate diagnostic identities
+  const values=entry.values;for(let k=0;k<16;k++)if(values[k]!==matrices[index*16+k])continue candidate;
+  for(let k=0;k<4;k++)if(values[16+k]!==plants[index*4+k]||values[20+k]!==records[index*4+k])continue candidate;
+  return entry;
+ }
+ return null;
+}
+function rememberPlantRecord(pool,key,matrices,plants,records,index,bound,generation){
+ if(pool.size>=MEDIA_PLANT_RECORD_LIMIT)return;
+ const values=new Float32Array(24);values.set(matrices.subarray(index*16,index*16+16));values.set(plants.subarray(index*4,index*4+4),16);values.set(records.subarray(index*4,index*4+4),20);
+ let bucket=pool.buckets.get(key);if(!bucket)pool.buckets.set(key,bucket=[]);bucket.push({values,bound,generation});pool.size++;
+}
+function prunePlantRecords(pool,generation){
+ if(pool.size<MEDIA_PLANT_RECORD_LIMIT)return;
+ for(const [key,bucket]of pool.buckets){const retained=bucket.filter(entry=>entry.generation>=generation-1);pool.size-=bucket.length-retained.length;if(retained.length)pool.buckets.set(key,retained);else pool.buckets.delete(key);}
+}
 /** Bound the installed non-canopy WebGL plant shader without adding height below its base. */
 export function webGLPalmOcclusionBounds(local,matrix,{height,lean,windStrength,windLength}){
  if(!local||![height,lean,windStrength,windLength].every(Number.isFinite)||height<0||lean<0||windLength<0)return null;
@@ -369,7 +394,7 @@ function nativePlantIndex(type,wind){
 }
 /** Collects physical meshes including noncolliding props/avatars; forest records stay flat and indexed. */
 export function collectMediaScreenOccluders(active,{camera,projection,screenObjectId,avatarRoots=[]}={}){
- const bounds=[],reasons=[],stats={meshes:0,instances:0,nativeCandidates:0,skyInteriorExclusions:0};if(!active?.root||!projection)return {bounds,complete:false,reasons:['No active screen projection'],stats};
+ const bounds=[],reasons=[],stats={meshes:0,instances:0,nativeCandidates:0,skyInteriorExclusions:0,plantRecordHits:0,plantRecordNew:0,plantRecordInvalidations:0,plantRecordPoolSize:0,instanceCacheRebuilds:0};if(!active?.root||!projection)return {bounds,complete:false,reasons:['No active screen projection'],stats};
  const conePoints=[camera.position.toArray(),...projection.world],cone={min:[0,1,2].map(i=>Math.min(...conePoints.map(p=>p[i]))-.25),max:[0,1,2].map(i=>Math.max(...conePoints.map(p=>p[i]))+.25)},native=active.nativeIsland;
  const ground=nativeMediaGroundProof(active,projection,camera);if(!ground.clear)reasons.push(ground.reason);
  const waterExcluded=mediaScreenSurfaceExcluded(native,projection,camera);
@@ -399,23 +424,36 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
      const provenPalm=node.userData?.mediaOcclusionPlant==='native-palm-v1'&&/^native-source-plants-webgl\/(?:1|2):palm(?:\||$)/.test(key);
      const {aVeg,aMat}=node.geometry.attributes,index=node.geometry.index,windSpeed=active.project?.environment.windSpeed??6;
      const rigid=!plant&&!Object.values(node.geometry.morphAttributes??{}).some(a=>a.length)&&!Array.isArray(node.material)&&hasStaticWebGLMediaMaterial(node.material);
-     const stamp=[rigid,provenPalm,count,windSpeed,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,aVeg?.version,aMat?.version,index?.version,...node.matrixWorld.elements].join(',');
+     const stamp=[rigid,provenPalm,windSpeed,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,aVeg?.version,aMat?.version,index?.version,...node.matrixWorld.elements].join(',');
      const uploads=[node.instanceMatrix.version,plant?.version,record?.version].join(',');
      let cached=instanceBoundsCache.get(node);
-     const sameInputs=cached?.stamp===stamp&&cached.local===local&&cached.index===index&&cached.aVeg===aVeg&&cached.aMat===aMat&&cached.matrixAttribute===node.instanceMatrix&&cached.plant===plant&&cached.record===record;
+     const sameInputs=cached?.stamp===stamp&&cached.local===local&&cached.index===index&&cached.aVeg===aVeg&&cached.aMat===aMat&&cached.matrixAttribute===node.instanceMatrix&&cached.plant===plant&&cached.record===record&&cached.material===node.material&&cached.compile===node.material?.onBeforeCompile&&cached.programKey===key;
      // The plant renderer repacks draw buffers for each camera. Returning to
      // the main view may upload the identical visible instances a second time.
      // Compare private copies of their active values before reusing the grid
      // and per-triangle palm bounds. Upload order is significant.
-     const identicalUpload=sameInputs&&(cached.uploads===uploads||(cached.snapshot&&
+     const identicalUpload=sameInputs&&cached.count===count&&(cached.uploads===uploads||(cached.snapshot&&
       sameUpload(cached.snapshot.matrices,matrices)&&sameUpload(cached.snapshot.plants,plant.array)&&sameUpload(cached.snapshot.records,record.array)));
      if(!identicalUpload){const entries=[],grid=new Map(),cell=32,w=Math.max(windSpeed*.1,.03);let radius=0;
+      stats.instanceCacheRebuilds++;
+      // Camera packing changes active order/count, not the authored plant pose.
+      // Position/seed hashes only select a bucket: all 24 uploaded floats must match.
+      const packed=!!plant&&packedFloatAttribute(node.instanceMatrix,16,count)&&packedFloatAttribute(plant,4,count)&&packedFloatAttribute(record,4,count);
+      const records=packed?(sameInputs&&cached.records||{buckets:new Map(),size:0}):null,generation=(sameInputs?cached.generation:0)+1;
+      if(cached?.records&&!sameInputs)stats.plantRecordInvalidations++;
+      const words=array=>new Uint32Array(array.buffer,array.byteOffset,array.length),matrixWords=packed?words(matrices):null,plantWords=packed?words(plant.array):null,recordWords=packed?words(record.array):null;
+      if(records)prunePlantRecords(records,generation);
       for(let i=0;i<count;i++){
-       const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16)),scale=Math.max(Math.hypot(...matrix.slice(0,3)),Math.hypot(...matrix.slice(4,7)),Math.hypot(...matrix.slice(8,11)));
-       const palm=provenPalm&&record?.getZ(i)<=.5;
-       const tight=palm?webGLPalmOcclusionBounds(local,matrix,{height:Math.abs(plant.getZ(i)),lean:Math.abs(plant.getY(i)),windStrength:windMeta?.nativeWindStrength,windLength:Math.hypot(windVector?.x??NaN,windVector?.y??NaN)}):null;
-       const pad=plant?Math.abs(plant.getZ(i))*scale*(1+Math.abs(plant.getY(i))+.017*w*w+.013*w)+.2:0,b=tight??transformedBounds(local,matrix,pad);
-       if(rigid)retainOrientedMediaBounds(b,local,matrix);
+       const recordKey=records?plantRecordKey(matrixWords,plantWords,recordWords,i):0,previous=matchingPlantRecord(records,recordKey,matrices,plant?.array,record?.array,i,generation);let b=previous?.bound;
+       if(previous){previous.generation=generation;stats.plantRecordHits++;}
+       else{
+        const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16)),scale=Math.max(Math.hypot(...matrix.slice(0,3)),Math.hypot(...matrix.slice(4,7)),Math.hypot(...matrix.slice(8,11)));
+        const palm=provenPalm&&record?.getZ(i)<=.5;
+        const tight=palm?webGLPalmOcclusionBounds(local,matrix,{height:Math.abs(plant.getZ(i)),lean:Math.abs(plant.getY(i)),windStrength:windMeta?.nativeWindStrength,windLength:Math.hypot(windVector?.x??NaN,windVector?.y??NaN)}):null;
+        const pad=plant?Math.abs(plant.getZ(i))*scale*(1+Math.abs(plant.getY(i))+.017*w*w+.013*w)+.2:0;b=tight??transformedBounds(local,matrix,pad);
+        if(rigid)retainOrientedMediaBounds(b,local,matrix);
+        if(records){rememberPlantRecord(records,recordKey,matrices,plant.array,record.array,i,b,generation);stats.plantRecordNew++;}
+       }
        const x=(b.min[0]+b.max[0])/2,z=(b.min[2]+b.max[2])/2;radius=Math.max(radius,(b.max[0]-b.min[0])/2,(b.max[2]-b.min[2])/2);entries.push(b);
        const cellKey=Math.floor(x/cell)+':'+Math.floor(z/cell);let bucket=grid.get(cellKey);if(!bucket)grid.set(cellKey,bucket=[]);bucket.push(i);
       }
@@ -423,16 +461,19 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
       if(packedFloatAttribute(node.instanceMatrix,16,count)&&packedFloatAttribute(plant,4,count)&&packedFloatAttribute(record,4,count)){
        snapshot={matrices:matrices.slice(0,count*16),plants:plant.array.slice(0,count*4),records:record.array.slice(0,count*4)};
       }
-      cached={stamp,uploads,snapshot,local,index,aVeg,aMat,matrixAttribute:node.instanceMatrix,plant,record,entries,grid,cell,radius,details:new Map()};instanceBoundsCache.set(node,cached);
+      const details=sameInputs?cached.details:new Map();if(details.size){const activeBounds=new Set(entries);for(const bound of details.keys())if(!activeBounds.has(bound))details.delete(bound);}
+      cached={stamp,count,uploads,snapshot,records,generation,local,index,aVeg,aMat,matrixAttribute:node.instanceMatrix,plant,record,material:node.material,compile:node.material?.onBeforeCompile,programKey:key,entries,grid,cell,radius,details};instanceBoundsCache.set(node,cached);
      }else cached.uploads=uploads;
+     stats.plantRecordPoolSize+=cached.records?.size??0;
      for(let z=Math.floor((cone.min[2]-cached.radius)/cached.cell);z<=Math.floor((cone.max[2]+cached.radius)/cached.cell);z++)for(let x=Math.floor((cone.min[0]-cached.radius)/cached.cell);x<=Math.floor((cone.max[0]+cached.radius)/cached.cell);x++)for(const i of cached.grid.get(x+':'+z)??[]){stats.instances++;const b=cached.entries[i];if(boxIntersects(b,cone)){
        const palm=provenPalm&&record?.getZ(i)<=.5;
        if(palm){
-        let details=cached.details.get(i);
-        if(!details){const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16));details=webGLPalmTriangleBounds(node.geometry,matrix,{height:Math.abs(plant.getZ(i)),lean:plant.getY(i),angle:plant.getX(i),windStrength:windMeta?.nativeWindStrength,windLength:Math.hypot(windVector?.x??NaN,windVector?.y??NaN)});if(details){details.forEach((piece,triangle)=>piece.source={kind:'palm-triangle',species:node.userData?.nativePlantSpecies,index:i,triangle});cached.details.set(i,details);}}
-        if(details){for(const piece of details)if(boxIntersects(piece,cone))bounds.push(piece);continue;}
+        let details=cached.details.get(b);
+        if(!details){const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16));details=webGLPalmTriangleBounds(node.geometry,matrix,{height:Math.abs(plant.getZ(i)),lean:plant.getY(i),angle:plant.getX(i),windStrength:windMeta?.nativeWindStrength,windLength:Math.hypot(windVector?.x??NaN,windVector?.y??NaN)});if(details){details.forEach((piece,triangle)=>piece.source={kind:'palm-triangle',species:node.userData?.nativePlantSpecies,index:i,triangle});cached.details.set(b,details);}}
+        if(details){for(const piece of details)if(boxIntersects(piece,cone)){piece.source.index=i;bounds.push(piece);}continue;}
        }
        bounds.push(b);b.source??={kind:'instance',mesh:node.name||node.userData?.nativePlantSpecies||'unnamed',program:node.material?.customProgramCacheKey?.()??'',index:i,canopy:record?.getZ(i),height:plant?.getZ(i),lean:plant?.getY(i)};
+       b.source.index=i;
       }}
     }}
     else{const b=transformedBounds(local,node.matrixWorld);stats.meshes++;if(boxIntersects(b,cone))bounds.push(b);}

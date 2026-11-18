@@ -405,6 +405,60 @@ test('vegetation visibility survives identical camera uploads and updates on a s
  geometry.dispose();material.dispose();
 });
 
+function packedPlantFixture(capacity=4,geometry=new T.BoxGeometry(1,1,1)){
+ const f=fixture(),material=new T.MeshStandardMaterial(),mesh=new T.InstancedMesh(geometry,material,capacity);
+ geometry.setAttribute('iPlant',new T.InstancedBufferAttribute(new Float32Array(capacity*4),4));geometry.setAttribute('iRecord',new T.InstancedBufferAttribute(new Float32Array(capacity*4),4));
+ material.userData.nativeWindStrength=1;material.userData.nativeWindVector=new T.Vector2(1,0);f.root.add(mesh);
+ const pack=records=>{mesh.count=records.length;for(let i=0;i<records.length;i++){const r=records[i],m=r.matrix??new T.Matrix4().makeTranslation(r.x??6.5,3,r.z??-86);mesh.setMatrixAt(i,m);geometry.attributes.iPlant.setXYZW(i,r.angle??0,r.lean??.1,r.height??2,r.seed??1);geometry.attributes.iRecord.setXYZW(i,r.yaw??0,r.scale??1,r.canopy??1,r.flag??0);}mesh.instanceMatrix.needsUpdate=true;geometry.attributes.iPlant.needsUpdate=true;geometry.attributes.iRecord.needsUpdate=true;};
+ const inspect=()=>collectMediaScreenOccluders(f.active,{camera:f.camera,projection:f.projection,screenObjectId:'tv'});
+ const fresh=()=>{const clone=new T.InstancedMesh(mesh.geometry.clone(),mesh.material.clone(),capacity);clone.instanceMatrix.array.set(mesh.instanceMatrix.array);clone.count=mesh.count;clone.userData={...mesh.userData};clone.position.copy(mesh.position);clone.rotation.copy(mesh.rotation);clone.scale.copy(mesh.scale);clone.material.onBeforeCompile=mesh.material.onBeforeCompile;clone.material.customProgramCacheKey=mesh.material.customProgramCacheKey;f.root.remove(mesh);f.root.add(clone);try{return inspect();}finally{f.root.remove(clone);f.root.add(mesh);clone.geometry.dispose();clone.material.dispose();}};
+ const shape=proof=>proof.bounds.map(b=>({min:b.min,max:b.max,index:b.source?.index}));
+ const checkFresh=proof=>{const expected=fresh();assert.deepEqual(shape(proof),shape(expected));assert.deepEqual(mediaScreenCellVisibility(f.projection,f.camera,proof.bounds,proof),mediaScreenCellVisibility(f.projection,f.camera,expected.bounds,expected));};
+ return {...f,mesh,pack,inspect,fresh,shape,checkFresh};
+}
+test('packed plant cache reuses exact records across repacks and count changes, matching fresh recomputation',()=>{
+ const f=packedPlantFixture(),a={x:6,height:2,seed:7},b={x:7,height:3,seed:7},c={x:8,height:4,seed:7};
+ f.pack([a,b,c]);let proof=f.inspect();assert.equal(proof.stats.plantRecordNew,3);const original=proof.bounds.slice();
+ f.pack([c,a]);proof=f.inspect();assert.equal(proof.stats.plantRecordHits,2);assert.equal(proof.stats.plantRecordNew,0);assert.equal(proof.bounds[0],original[2]);assert.equal(proof.bounds[1],original[0]);f.checkFresh(proof);
+ f.pack([a,c,b]);proof=f.inspect();assert.equal(proof.stats.plantRecordHits,3);f.checkFresh(proof);
+ f.pack([]);assert.equal(f.inspect().bounds.length,0);f.pack([a,b,c]);proof=f.inspect();assert.equal(proof.stats.plantRecordHits,3);f.checkFresh(proof);
+ // Same seed and position select one bucket, never grant reuse by slot/seed.
+ f.pack([a,{...a,height:5},{...a}]);proof=f.inspect();assert.equal(proof.stats.plantRecordNew,2);assert.notEqual(proof.bounds[0],proof.bounds[1]);assert.notEqual(proof.bounds[0],proof.bounds[2]);f.checkFresh(proof);
+ f.pack([a,b,c]);proof=f.inspect();assert.equal(proof.bounds[0],original[0],'private snapshots survived in-place buffer overwrites');f.checkFresh(proof);
+});
+test('packed bounds reject changed transforms, every uploaded record field, wind, geometry and material state',()=>{
+ const f=packedPlantFixture(),base={x:6.5,seed:9,height:3};f.pack([base]);f.inspect();
+ const changes=[{angle:.4},{lean:.8},{height:4},{seed:10},{yaw:.7},{scale:2},{canopy:0},{flag:1},{matrix:new T.Matrix4().makeRotationY(.7).setPosition(6.5,3,-86)}];
+ for(const change of changes){f.pack([{...base,...change}]);const proof=f.inspect();assert.equal(proof.stats.plantRecordNew,1,JSON.stringify(change));f.checkFresh(proof);f.pack([base]);f.inspect();}
+ for(const mutate of [
+  ()=>{f.mesh.material.userData.nativeWindStrength=.4;},
+  ()=>{f.mesh.material.userData.nativeWindVector.set(.2,.8);},
+  ()=>{f.active.project.environment.windSpeed=9;},
+  ()=>{f.mesh.position.x=.2;},
+  ()=>{const p=f.mesh.geometry.attributes.position;p.setX(0,p.getX(0)+.1);p.needsUpdate=true;},
+  ()=>{f.mesh.geometry.index.needsUpdate=true;},
+  ()=>{f.mesh.geometry.setAttribute('iPlant',f.mesh.geometry.attributes.iPlant.clone());},
+  ()=>{f.mesh.instanceMatrix=f.mesh.instanceMatrix.clone();},
+  ()=>{f.mesh.material=f.mesh.material.clone();},
+  ()=>{f.mesh.material.onBeforeCompile=()=>{};},
+ ]){mutate();const proof=f.inspect();assert.equal(proof.stats.plantRecordInvalidations,1);assert.equal(proof.stats.plantRecordNew,1);f.checkFresh(proof);}
+});
+test('constant-seed plant populations retain a bounded cache and fresh camera membership',()=>{
+ const f=packedPlantFixture(8300),records=Array.from({length:8300},(_,i)=>({x:100+i,seed:0,height:2}));
+ f.pack(records);let proof=f.inspect();assert.equal(proof.stats.plantRecordPoolSize,8192);assert.equal(proof.bounds.length,0);
+ f.pack(records.slice().reverse());proof=f.inspect();assert.equal(proof.stats.plantRecordPoolSize,8192);assert.ok(proof.stats.plantRecordHits>=8100);assert.equal(proof.bounds.length,0);
+ f.pack([{x:6.5,seed:0,height:2}]);proof=f.inspect();assert.equal(proof.bounds.length,1,'new in-cone record is never lost when retention is full');f.checkFresh(proof);
+});
+test('actual palm triangle detail survives repacking with current pack indices and fresh equivalent visibility',()=>{
+ const source=buildPalmNear(),f=packedPlantFixture(3,convertNativePlantGeometry(source.geometry));
+ f.mesh.userData.mediaOcclusionPlant='native-palm-v1';f.mesh.material.customProgramCacheKey=()=> 'native-source-plants-webgl/2:palm';
+ const a={x:6.2,seed:1,height:4,canopy:0},b={x:7,seed:2,height:4,canopy:0};f.pack([a,b]);let proof=f.inspect();
+ const first=proof.bounds.filter(b=>b.source?.kind==='palm-triangle'&&b.source.index===0);assert.ok(first.length>0);f.checkFresh(proof);
+ f.pack([b,a]);proof=f.inspect();assert.equal(proof.stats.plantRecordHits,2);const current=new Set(proof.bounds);assert.ok(first.every(b=>current.has(b)&&b.source.index===1),'retained detail follows authoritative uploaded ordering');f.checkFresh(proof);
+ f.pack([a]);proof=f.inspect();assert.equal(proof.stats.plantRecordHits,1);assert.ok(proof.bounds.every(b=>b.source.index===0));f.checkFresh(proof);
+ source.geometry.dispose();f.mesh.geometry.dispose();f.mesh.material.dispose();
+});
+
 test('affine palm bounds match all eight transformed corners with negative scales and shear',()=>{
  const local={min:[-1,-2,-3],max:[2,3,4],radius:6},matrix=new T.Matrix4().set(
   -1.5,.25,.75,5, 2,-1,.1,-3, .3,.8,1.25,2, 0,0,0,1);
