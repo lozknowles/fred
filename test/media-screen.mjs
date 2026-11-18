@@ -4,6 +4,8 @@ import {parseYouTubeSelection,youtubeWatchURL} from '../src/world-runtime/YouTub
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
 import * as N from '../src/engine/index.js';
 import {Material} from '../src/engine/render/Material.js';
+import {createWarehouseSurfaces} from '../src/world-runtime/WarehouseSurfaces.js';
+import {primeWebGLWeatherShelter,hasStaticWebGLMediaMaterial} from '../src/world-runtime/WebGLWeatherShelter.js';
 import {buildPalmNear} from '../src/world/vegetation/PlantGeometry.js';
 import {convertNativePlantGeometry,buildWebGLNativeSky} from '../src/world-runtime/WebGLNativeIsland.js';
 import {mediaLayout,buildMediaScreenHousing,projectMediaScreen,screenQuadTransform,mediaScreenUnobstructed,mediaScreenCellVisibility,mediaSightTiles,webGLPalmOcclusionBounds,webGLPalmTriangleBounds,collectMediaScreenOccluders,mediaScreenSurfaceExcluded,youtubeEmbedURL,MediaScreen} from '../src/world-runtime/MediaScreen.js';
@@ -22,6 +24,56 @@ function clippingFixture(x=0,y=0,z=-5,angle=0,viewport={left:0,top:0,width:1280,
  const camera=new T.PerspectiveCamera(65,16/9,.1,100),matrix=new T.Matrix4().makeRotationY(angle);matrix.setPosition(x,y,z);
  return {camera,matrix,viewport,projection:projectMediaScreen(camera,matrix,config,viewport)};
 }
+function rigidInstanceFixture(matrix,geometry=new T.BoxGeometry(1,1,1)){
+ const f=clippingFixture(),root=new T.Group(),material=new T.MeshStandardMaterial({side:T.DoubleSide}),mesh=new T.InstancedMesh(geometry,material,1);
+ mesh.setMatrixAt(0,matrix);mesh.instanceMatrix.needsUpdate=true;root.add(mesh);
+ const collect=()=>collectMediaScreenOccluders({root,project:{environment:{windSpeed:5}}},{camera:f.camera,projection:f.projection,screenObjectId:'tv'});
+ const visible=()=>{const proof=collect();return mediaScreenCellVisibility(f.projection,f.camera,proof.bounds,{complete:proof.complete});};
+ return {...f,root,mesh,material,collect,visible};
+}
+test('authored stair handrail retains the clear TV instead of filling its rotated world AABB',()=>{
+ // Live b06 pose: the suspected hanging-light blackout was actually this rail.
+ const matrix=new T.Matrix4().compose(new T.Vector3(5.08,5.45,-74.35),new T.Quaternion().setFromEuler(new T.Euler(-.366,0,0)),new T.Vector3(.1,.1,10.2)),f=rigidInstanceFixture(matrix);
+ const elements=[.5795327668189889,0,.8149489383900854,0,.32485356309552293,.9171169218130598,-.23101236821495286,0,-.747403461811136,.3986183032979518,.5314993071948368,0,4.979852529425681,6.55,-73.80046696149851,1];
+ f.camera.near=.06;f.camera.matrixAutoUpdate=false;f.camera.matrix.fromArray(elements);f.camera.matrixWorld.fromArray(elements);f.camera.matrixWorldInverse.copy(f.camera.matrixWorld).invert();f.camera.position.set(...elements.slice(12,15));
+ f.projection.world=[[15.481,7,-80.2],[15.481,7,-73.8],[15.481,3.4,-73.8],[15.481,3.4,-80.2]];
+ const surfaces=createWarehouseSurfaces();assert.equal(surfaces.apply({procedural:true,material:'steel'},f.mesh.geometry,f.material,matrix,[],1),true);
+ primeWebGLWeatherShelter({scene:new T.Scene()},f.root);assert.equal(hasStaticWebGLMediaMaterial(f.material),true);
+ const proof=f.collect(),bound=proof.bounds[0];assert.equal(proof.complete,true);
+ assert.equal(mediaScreenCellVisibility(f.projection,f.camera,[{min:bound.min,max:bound.max}],{complete:true}).visible,false,'the exact old AABB reproduces the full blackout');
+ const visible=mediaScreenCellVisibility(f.projection,f.camera,proof.bounds,{complete:true});assert.equal(visible.visible,true);assert.equal(visible.partial,false);assert.equal(visible.visibleFraction,1);
+ // A same-name replacement shader cannot inherit the renderer-owned proof.
+ f.material.onBeforeCompile=()=>{};assert.equal(hasStaticWebGLMediaMaterial(f.material),false);assert.equal(f.visible().visible,false);
+ surfaces.dispose();
+});
+test('oriented instance proof preserves real near-plane/partial/full blockers and clears behind-TV geometry',()=>{
+ for(const [matrix,expected]of [
+  [new T.Matrix4().compose(new T.Vector3(0,0,-2.5),new T.Quaternion().setFromEuler(new T.Euler(0,0,.6)),new T.Vector3(.2,5,.2)),'partial'],
+  [new T.Matrix4().makeScale(20,20,20).setPosition(0,0,-2),'hidden'],
+  [new T.Matrix4().makeScale(20,20,.1).setPosition(0,0,-6),'clear'],
+  [new T.Matrix4().makeScale(.2,20,.4).setPosition(.15,0,-.1),'partial'],
+  [new T.Matrix4().compose(new T.Vector3(0,0,-2.5),new T.Quaternion().setFromEuler(new T.Euler(.2,0,.6)),new T.Vector3(-.2,5,.2)),'partial'],
+ ]){
+  const f=rigidInstanceFixture(matrix),result=f.visible();
+  assert.equal(result.visible,expected!=='hidden');if(expected==='partial')assert.equal(result.partial,true);if(expected==='clear')assert.equal(result.partial,false);
+  const inverse=matrix.clone().invert(),localCamera={position:f.camera.position.clone().applyMatrix4(inverse),near:f.camera.near,matrixWorldInverse:new T.Matrix4().multiplyMatrices(f.camera.matrixWorldInverse,matrix)},localProjection={world:f.projection.world.map(p=>new T.Vector3(...p).applyMatrix4(inverse).toArray())};
+  for(let y=0;y<13;y++)for(let x=0;x<19;x++){
+   const u=(x+.37)/19,v=(y+.61)/13;
+   if(maskShows(result,u,v))assert.equal(referenceRayBlocked(localProjection,localCamera,[{min:[-.5,-.5,-.5],max:[.5,.5,.5]}],u,v),false,'revealed UV must not intersect the actual oriented box');
+  }
+ }
+});
+test('oriented box caches follow instance/world/attribute changes and reject morphs, displacement and callbacks',()=>{
+ const off=new T.Matrix4().makeScale(.1,.1,1).setPosition(20,0,-2.5),full=new T.Matrix4().makeScale(20,20,.2).setPosition(0,0,-2.5),f=rigidInstanceFixture(off);
+ assert.equal(f.visible().visible,true);f.mesh.setMatrixAt(0,full);f.mesh.instanceMatrix.needsUpdate=true;assert.equal(f.visible().visible,false);
+ f.mesh.position.x=30;assert.equal(f.visible().visible,true);f.mesh.position.x=0;assert.equal(f.visible().visible,false);
+ const position=f.mesh.geometry.attributes.position;for(let i=0;i<position.count;i++)position.setX(i,position.getX(i)+20);position.needsUpdate=true;assert.equal(f.visible().visible,true);
+ const rail=new T.Matrix4().compose(new T.Vector3(0,0,-.05),new T.Quaternion().setFromEuler(new T.Euler(.6,0,0)),new T.Vector3(.1,.1,10)),g=rigidInstanceFixture(rail);
+ // Eligibility tracks exact hooks, not public program-key text.
+ assert.equal(hasStaticWebGLMediaMaterial(g.material),true);g.material.customProgramCacheKey=()=>'';assert.equal(hasStaticWebGLMediaMaterial(g.material),false);
+ const h=rigidInstanceFixture(off);h.material.displacementMap=new T.Texture();assert.equal(hasStaticWebGLMediaMaterial(h.material),false);
+ const a=rigidInstanceFixture(off);a.mesh.geometry.morphAttributes.position=[a.mesh.geometry.attributes.position.clone()];assert.equal(a.collect().complete,true,'unsupported deformation keeps conservative bounds instead of omitting the mesh');
+});
 function assertClipMapping(projection){
  const values=screenQuadTransform(projection.quad).slice(9,-1).split(',').map(Number),v=projection.viewport;
  for(const point of projection.visiblePolygon){

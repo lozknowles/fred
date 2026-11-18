@@ -68,6 +68,11 @@ function installMetricUV(material,metres){
  };
  material.customProgramCacheKey=()=>`warehouse-metric-uv/1/${metres}`;
 }
+const staticMetalHooks=new WeakMap();
+// These installed hooks add varyings and surface wear, never vertex displacement.
+export function hasWarehouseStaticVertexHook(material,compile=material.onBeforeCompile,key=material.customProgramCacheKey){
+ const proof=staticMetalHooks.get(material);return !!proof&&compile===proof.compile&&key===proof.key;
+}
 function installMetalWear(material){
  material.onBeforeCompile=shader=>{
   shader.vertexShader='varying vec3 vWarehouseWearPosition;\n'+shader.vertexShader;
@@ -91,6 +96,7 @@ function installMetalWear(material){
   shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor=min(1.0,roughnessFactor+warehouseWear*.18);');
  };
  material.customProgramCacheKey=()=> 'warehouse-metal-wear/1';
+ staticMetalHooks.set(material,{compile:material.onBeforeCompile,key:material.customProgramCacheKey});
 }
 export function createWarehouseSurfaces({baseUrl=import.meta.env?.BASE_URL??'/',fetchImage=async url=>{
  const response=await fetch(url);if(!response.ok)throw Error('Warehouse surface read failed: '+url);

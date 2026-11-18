@@ -1,5 +1,6 @@
 import { T, writeRainQuads, quadIndices, RAIN_PARTICLES } from './vendor/world-engine-contract.js';
 import { repositoryWeatherShelters, excludeShelteredRain, MAX_WEATHER_SHELTERS } from './WeatherShelter.js';
+import {hasWarehouseStaticVertexHook} from './WarehouseSurfaces.js';
 
 const fogFunctions=`
 uniform int weatherShelterCount;
@@ -35,6 +36,15 @@ float weatherExteriorDistance(vec3 start,vec3 end){
  return distance(start,end)*(1.0-covered);
 }`;
 const primedMaterials=new WeakMap();
+/** Geometry-only proof: the exact installed fog/wear hooks preserve positions.
+ * A program name or userData flag cannot admit a replacement vertex shader. */
+export function hasStaticWebGLMediaMaterial(material){
+ if(!(material instanceof T.MeshStandardMaterial||material instanceof T.MeshBasicMaterial)||material.displacementMap)return false;
+ const record=primedMaterials.get(material);
+ if(record&&(material.onBeforeCompile!==record.hook||material.customProgramCacheKey!==record.cacheKey))return false;
+ const compile=record?.prior??material.onBeforeCompile,key=record?.priorKey??material.customProgramCacheKey;
+ return compile===T.Material.prototype.onBeforeCompile&&key===T.Material.prototype.customProgramCacheKey||hasWarehouseStaticVertexHook(material,compile,key);
+}
 function weatherState(engine){
  let state=engine.scene.userData.weatherShelter;
  if(!state){

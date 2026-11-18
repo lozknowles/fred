@@ -17,3 +17,29 @@ for(const isWebGL of [false,true])test('electric rim retains an open centre and 
  effects.transition('active');assert.equal(effects.diagnostics().beamVisible,true);effects.transition('outcome-unknown');assert.equal(effects.diagnostics().beamVisible,false);
  effects.clear();assert.equal(root.children.length,0);assert.equal(effects.diagnostics().frames,0);effects.dispose();effects.dispose();
 });
+
+test('cached electrical arc rotation preserves the original rim at both directions and long phases',()=>{
+ const root=new T.Group(),effects=createPortalEffects({isWebGL:true});
+ const frame=effects.addFrame(root,portal),arcs=frame.children.filter(c=>c.name==='Portal electrical storm arc');
+ const originals=arcs.map((_,i)=>new T.TorusGeometry(1.35,.028,4,48,.68+.15*(i%2)));
+ const phases=arcs.map(()=>0);
+ try{
+  for(let step=0;step<1600;step++){
+   const dt=step%3===0?.1:.037;
+   effects.update(dt,step*.1);
+   for(let i=0;i<arcs.length;i++)phases[i]+=dt*(i%2?-.21:.17);
+   if(step%83!==0&&step!==1599)continue;
+   for(let i=0;i<arcs.length;i++){
+    const p=arcs[i].geometry.getAttribute('position'),original=originals[i].getAttribute('position');
+    for(let j=0;j<p.count;j++){
+     const x=original.getX(j),y=original.getY(j),angle=Math.atan2(y,x)+i*Math.PI*.25+phases[i],c=Math.cos(angle),s=Math.sin(angle);
+     const rim=Math.min((portal.width/2+.13)/Math.max(.00001,Math.abs(c)),(portal.height/2+.13)/Math.max(.00001,Math.abs(s)));
+     const radius=rim+Math.hypot(x,y)-1.35;
+     assert.ok(Math.abs(p.getX(j)-Math.fround(c*radius))<.000001);
+     assert.ok(Math.abs(p.getY(j)-Math.fround(s*radius))<.000001);
+     assert.equal(p.getZ(j),original.getZ(j));
+    }
+   }
+  }
+ }finally{effects.dispose();for(const g of originals)g.dispose();}
+});

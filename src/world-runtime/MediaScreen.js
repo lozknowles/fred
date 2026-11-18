@@ -1,5 +1,6 @@
 import {parseYouTubeSelection,youtubeWatchURL} from './YouTubeSelection.js';
 import {SkinBounds} from '../engine/render/SkinBounds.js';
+import {hasStaticWebGLMediaMaterial} from './WebGLWeatherShelter.js';
 // Renderer-owned identity registration: mesh names/userData cannot grant exclusion.
 const rendererMediaSkies=new WeakMap();
 export function registerRendererMediaSky(owner,mesh,containsSightCone){
@@ -82,6 +83,8 @@ const sightSubtract=(a,b)=>a.map((n,i)=>n-b[i]);
 const sightCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const sightDot=(a,b)=>a.reduce((n,v,i)=>n+v*b[i],0);
 const finitePoint=p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite);
+// Private geometry proof, separate from diagnostic names/userData.
+const orientedMediaBounds=new WeakMap();
 /** Convex truncated sight volume versus complete finite world AABBs. Touching blocks. */
 export function mediaScreenUnobstructed(projection,camera,bounds,{complete=false,onBlocked}={}){
  const deny=(reason,boundIndex)=>{onBlocked?.({reason,boundIndex});return false;};
@@ -121,7 +124,13 @@ export function mediaScreenUnobstructed(projection,camera,bounds,{complete=false
    // Require a real gap: tangency and numerical uncertainty remain blocked.
    if(maximum<lo-1e-7||minimum>hi+1e-7){separated=true;break;}
   }
-  if(!separated)return deny('Scene bound intersects the complete TV sight volume',index);
+  if(!separated){
+   if(orientedMediaBounds.has(bound)){
+    const volume=sightVolume(projection,camera),shadow=volume&&boxSightShadow(bound,volume);
+    if(shadow&&shadow.length<3)continue;
+   }
+   return deny('Scene bound intersects the complete TV sight volume',index);
+  }
  }
  return true;
 }
@@ -165,7 +174,7 @@ function sightVolume(projection,camera){
  * near/TV/side sight planes before projection. Unclipped box projection is unsafe
  * for boxes crossing the near plane or the actual, possibly oblique, TV plane. */
 function boxSightShadow(bound,volume){
- const corners=[];for(let x=0;x<2;x++)for(let y=0;y<2;y++)for(let z=0;z<2;z++)corners.push([x?bound.max[0]+MEDIA_WORLD_PAD:bound.min[0]-MEDIA_WORLD_PAD,y?bound.max[1]+MEDIA_WORLD_PAD:bound.min[1]-MEDIA_WORLD_PAD,z?bound.max[2]+MEDIA_WORLD_PAD:bound.min[2]-MEDIA_WORLD_PAD]);
+ const corners=orientedMediaBounds.get(bound)??[];if(!corners.length)for(let x=0;x<2;x++)for(let y=0;y<2;y++)for(let z=0;z<2;z++)corners.push([x?bound.max[0]+MEDIA_WORLD_PAD:bound.min[0]-MEDIA_WORLD_PAD,y?bound.max[1]+MEDIA_WORLD_PAD:bound.min[1]-MEDIA_WORLD_PAD,z?bound.max[2]+MEDIA_WORLD_PAD:bound.min[2]-MEDIA_WORLD_PAD]);
  let faces=[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]].map(ids=>ids.map(i=>corners[i]));
  for(const {n,d}of volume.planes){
   const next=[],cap=[];
@@ -270,6 +279,22 @@ function transformedBounds(local,matrix,pad=0){
  const points=[];for(const x of [local.min[0],local.max[0]])for(const y of [local.min[1],local.max[1]])for(const z of [local.min[2],local.max[2]])points.push(transform(matrix,[x,y,z]));
  return {min:[0,1,2].map(i=>Math.min(...points.map(p=>p[i]))-pad),max:[0,1,2].map(i=>Math.max(...points.map(p=>p[i]))+pad)};
 }
+/** Keep the complete local box through affine transforms. A rotated thin rail's
+ * world AABB can cover the camera near plane while the actual rail is clear.
+ * This remains a closed conservative volume; near-plane cap faces are retained. */
+function retainOrientedMediaBounds(bound,local,matrix){
+ const e=matrix.elements??matrix;if(e.length!==16||!Array.from(e).every(Number.isFinite)||e[3]!==0||e[7]!==0||e[11]!==0||e[15]!==1)return;
+ const rows=[
+  [e[5]*e[10]-e[9]*e[6],e[8]*e[6]-e[4]*e[10],e[4]*e[9]-e[8]*e[5]],
+  [e[9]*e[2]-e[1]*e[10],e[0]*e[10]-e[8]*e[2],e[8]*e[1]-e[0]*e[9]],
+  [e[1]*e[6]-e[5]*e[2],e[4]*e[2]-e[0]*e[6],e[0]*e[5]-e[4]*e[1]]];
+ const det=e[0]*rows[0][0]+e[4]*rows[1][0]+e[8]*rows[2][0];if(!Number.isFinite(det)||Math.abs(det)<1e-12)return;
+ // Inverse row norms map a world-space padding cube into local coordinates,
+ // including nonuniform/negative scales and shear.
+ const pad=rows.map(row=>MEDIA_WORLD_PAD*row.reduce((sum,n)=>sum+Math.abs(n/det),0));
+ const corners=[];for(let x=0;x<2;x++)for(let y=0;y<2;y++)for(let z=0;z<2;z++)corners.push(transform(e,[x?local.max[0]+pad[0]:local.min[0]-pad[0],y?local.max[1]+pad[1]:local.min[1]-pad[1],z?local.max[2]+pad[2]:local.min[2]-pad[2]]));
+ if(corners.every(finitePoint))orientedMediaBounds.set(bound,corners);
+}
 
 function sameUpload(snapshot,source){
  for(let i=0;i<snapshot.length;i++)if(snapshot[i]!==source[i])return false;
@@ -373,7 +398,8 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
      // Both released palm material versions use the same vertex displacement. Version 2 changes the leaf surface.
      const provenPalm=node.userData?.mediaOcclusionPlant==='native-palm-v1'&&/^native-source-plants-webgl\/(?:1|2):palm(?:\||$)/.test(key);
      const {aVeg,aMat}=node.geometry.attributes,index=node.geometry.index,windSpeed=active.project?.environment.windSpeed??6;
-     const stamp=[provenPalm,count,windSpeed,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,aVeg?.version,aMat?.version,index?.version,...node.matrixWorld.elements].join(',');
+     const rigid=!plant&&!Object.values(node.geometry.morphAttributes??{}).some(a=>a.length)&&!Array.isArray(node.material)&&hasStaticWebGLMediaMaterial(node.material);
+     const stamp=[rigid,provenPalm,count,windSpeed,windMeta?.nativeWindStrength,windVector?.x,windVector?.y,aVeg?.version,aMat?.version,index?.version,...node.matrixWorld.elements].join(',');
      const uploads=[node.instanceMatrix.version,plant?.version,record?.version].join(',');
      let cached=instanceBoundsCache.get(node);
      const sameInputs=cached?.stamp===stamp&&cached.local===local&&cached.index===index&&cached.aVeg===aVeg&&cached.aMat===aMat&&cached.matrixAttribute===node.instanceMatrix&&cached.plant===plant&&cached.record===record;
@@ -389,6 +415,7 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
        const palm=provenPalm&&record?.getZ(i)<=.5;
        const tight=palm?webGLPalmOcclusionBounds(local,matrix,{height:Math.abs(plant.getZ(i)),lean:Math.abs(plant.getY(i)),windStrength:windMeta?.nativeWindStrength,windLength:Math.hypot(windVector?.x??NaN,windVector?.y??NaN)}):null;
        const pad=plant?Math.abs(plant.getZ(i))*scale*(1+Math.abs(plant.getY(i))+.017*w*w+.013*w)+.2:0,b=tight??transformedBounds(local,matrix,pad);
+       if(rigid)retainOrientedMediaBounds(b,local,matrix);
        const x=(b.min[0]+b.max[0])/2,z=(b.min[2]+b.max[2])/2;radius=Math.max(radius,(b.max[0]-b.min[0])/2,(b.max[2]-b.min[2])/2);entries.push(b);
        const cellKey=Math.floor(x/cell)+':'+Math.floor(z/cell);let bucket=grid.get(cellKey);if(!bucket)grid.set(cellKey,bucket=[]);bucket.push(i);
       }

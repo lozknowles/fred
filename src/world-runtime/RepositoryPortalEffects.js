@@ -46,12 +46,19 @@ export function createClosedPortalRimGeometry(width,height){
  const geometry=new T.BufferGeometry();geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));geometry.setAttribute('normal',new T.Float32BufferAttribute(normals,3));geometry.setAttribute('uv',new T.Float32BufferAttribute(uvs,2));geometry.setIndex(indices);return geometry;
 }
 function rimGeometry(width,height,start,sweep){
- const geometry=new T.TorusGeometry(1.35,.028,4,48,sweep),position=geometry.getAttribute('position'),original=Float32Array.from(position.array);
+ const geometry=new T.TorusGeometry(1.35,.028,4,48,sweep),position=geometry.getAttribute('position'),basis=new Float64Array(position.count*3);
+ // Each arc only rotates around the same rim. Keep its original unit direction
+ // and tube radius so the frame loop needs one sine/cosine pair per arc.
+ for(let i=0;i<position.count;i++){
+  const x=position.getX(i),y=position.getY(i),angle=Math.atan2(y,x)+start;
+  basis[i*3]=Math.cos(angle);basis[i*3+1]=Math.sin(angle);basis[i*3+2]=Math.hypot(x,y)-1.35;
+ }
  const update=phase=>{
+  const cp=Math.cos(phase),sp=Math.sin(phase),array=position.array;
   for(let i=0;i<position.count;i++){
-   const x=original[i*3],y=original[i*3+1],angle=Math.atan2(y,x)+start+phase,c=Math.cos(angle),s=Math.sin(angle);
+   const j=i*3,x=basis[j],y=basis[j+1],c=x*cp-y*sp,s=y*cp+x*sp;
    const rim=Math.min((width/2+.13)/Math.max(.00001,Math.abs(c)),(height/2+.13)/Math.max(.00001,Math.abs(s)));
-   const radius=rim+Math.hypot(x,y)-1.35;position.setXYZ(i,c*radius,s*radius,original[i*3+2]);
+   const radius=rim+basis[j+2];array[j]=c*radius;array[j+1]=s*radius;
   }
   position.needsUpdate=true;
  };
