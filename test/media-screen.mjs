@@ -458,6 +458,15 @@ test('actual palm triangle detail survives repacking with current pack indices a
  f.pack([a]);proof=f.inspect();assert.equal(proof.stats.plantRecordHits,1);assert.ok(proof.bounds.every(b=>b.source.index===0));f.checkFresh(proof);
  source.geometry.dispose();f.mesh.geometry.dispose();f.mesh.material.dispose();
 });
+test('adversarial same-key plant packs have bounded searches and conservative uncached overflow',()=>{
+ const f=packedPlantFixture(8192),far=Array.from({length:8192},(_,i)=>({x:100,z:-86,seed:0,height:2+i*.0001}));
+ f.pack(far);let proof=f.inspect();assert.equal(proof.stats.plantRecordPoolSize,16);assert.ok(proof.stats.plantRecordComparisons<=8192*16);f.checkFresh(proof);
+ f.pack(far.slice().reverse());proof=f.inspect();assert.equal(proof.stats.plantRecordPoolSize,16);assert.equal(proof.stats.plantRecordHits,16);assert.ok(proof.stats.plantRecordComparisons<=8192*16);f.checkFresh(proof);
+ const near=Array.from({length:512},()=>({x:6.5,z:-86,seed:0,height:2}));
+ f.pack(near);proof=f.inspect();assert.equal(proof.bounds.length,512);assert.equal(new Set(proof.bounds).size,512,'duplicate instances retain distinct active diagnostic identities');assert.deepEqual(proof.bounds.map(b=>b.source.index),Array.from({length:512},(_,i)=>i));assert.ok(proof.stats.plantRecordComparisons<=512*16);assert.equal(proof.stats.plantRecordPoolSize,32);f.checkFresh(proof);
+ const repacked=near.slice().reverse();repacked[0]={...repacked[0],flag:1}; // force a real buffer difference, not the whole-upload fast path
+ f.pack(repacked);proof=f.inspect();assert.equal(proof.stats.plantRecordHits,16);assert.ok(proof.stats.plantRecordComparisons<=512*16);assert.equal(new Set(proof.bounds).size,512);assert.deepEqual(proof.bounds.map(b=>b.source.index),Array.from({length:512},(_,i)=>i));f.checkFresh(proof);
+});
 
 test('affine palm bounds match all eight transformed corners with negative scales and shear',()=>{
  const local={min:[-1,-2,-3],max:[2,3,4],radius:6},matrix=new T.Matrix4().set(

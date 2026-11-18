@@ -305,14 +305,17 @@ function packedFloatAttribute(attribute,size,count){
   !attribute.isInterleavedBufferAttribute&&attribute.array.length>=count*size;
 }
 const MEDIA_PLANT_RECORD_LIMIT=8192;
+const MEDIA_PLANT_BUCKET_LIMIT=16;
 function plantRecordKey(matrixWords,plantWords,recordWords,index){
  let hash=Math.imul(2166136261^matrixWords[index*16+12],16777619);
  hash=Math.imul(hash^matrixWords[index*16+13],16777619);hash=Math.imul(hash^matrixWords[index*16+14],16777619);
  hash=Math.imul(hash^plantWords[index*4+3],16777619);return Math.imul(hash^recordWords[index*4+2],16777619);
 }
-function matchingPlantRecord(pool,key,matrices,plants,records,index,generation){
+function matchingPlantRecord(pool,key,matrices,plants,records,index,generation,stats){
  const bucket=pool?.buckets.get(key);if(!bucket)return null;
- candidate:for(const entry of bucket){
+ candidate:for(let entryIndex=0;entryIndex<bucket.length&&entryIndex<MEDIA_PLANT_BUCKET_LIMIT;entryIndex++){
+  const entry=bucket[entryIndex];
+  stats.plantRecordComparisons++;
   if(entry.generation===generation)continue; // duplicate records keep separate diagnostic identities
   const values=entry.values;for(let k=0;k<16;k++)if(values[k]!==matrices[index*16+k])continue candidate;
   for(let k=0;k<4;k++)if(values[16+k]!==plants[index*4+k]||values[20+k]!==records[index*4+k])continue candidate;
@@ -322,8 +325,9 @@ function matchingPlantRecord(pool,key,matrices,plants,records,index,generation){
 }
 function rememberPlantRecord(pool,key,matrices,plants,records,index,bound,generation){
  if(pool.size>=MEDIA_PLANT_RECORD_LIMIT)return;
+ const existing=pool.buckets.get(key);if(existing?.length>=MEDIA_PLANT_BUCKET_LIMIT)return;
  const values=new Float32Array(24);values.set(matrices.subarray(index*16,index*16+16));values.set(plants.subarray(index*4,index*4+4),16);values.set(records.subarray(index*4,index*4+4),20);
- let bucket=pool.buckets.get(key);if(!bucket)pool.buckets.set(key,bucket=[]);bucket.push({values,bound,generation});pool.size++;
+ let bucket=existing;if(!bucket)pool.buckets.set(key,bucket=[]);bucket.push({values,bound,generation});pool.size++;
 }
 function prunePlantRecords(pool,generation){
  if(pool.size<MEDIA_PLANT_RECORD_LIMIT)return;
@@ -394,7 +398,7 @@ function nativePlantIndex(type,wind){
 }
 /** Collects physical meshes including noncolliding props/avatars; forest records stay flat and indexed. */
 export function collectMediaScreenOccluders(active,{camera,projection,screenObjectId,avatarRoots=[]}={}){
- const bounds=[],reasons=[],stats={meshes:0,instances:0,nativeCandidates:0,skyInteriorExclusions:0,plantRecordHits:0,plantRecordNew:0,plantRecordInvalidations:0,plantRecordPoolSize:0,instanceCacheRebuilds:0};if(!active?.root||!projection)return {bounds,complete:false,reasons:['No active screen projection'],stats};
+ const bounds=[],reasons=[],stats={meshes:0,instances:0,nativeCandidates:0,skyInteriorExclusions:0,plantRecordHits:0,plantRecordNew:0,plantRecordInvalidations:0,plantRecordPoolSize:0,plantRecordComparisons:0,instanceCacheRebuilds:0};if(!active?.root||!projection)return {bounds,complete:false,reasons:['No active screen projection'],stats};
  const conePoints=[camera.position.toArray(),...projection.world],cone={min:[0,1,2].map(i=>Math.min(...conePoints.map(p=>p[i]))-.25),max:[0,1,2].map(i=>Math.max(...conePoints.map(p=>p[i]))+.25)},native=active.nativeIsland;
  const ground=nativeMediaGroundProof(active,projection,camera);if(!ground.clear)reasons.push(ground.reason);
  const waterExcluded=mediaScreenSurfaceExcluded(native,projection,camera);
@@ -444,7 +448,7 @@ export function collectMediaScreenOccluders(active,{camera,projection,screenObje
       const words=array=>new Uint32Array(array.buffer,array.byteOffset,array.length),matrixWords=packed?words(matrices):null,plantWords=packed?words(plant.array):null,recordWords=packed?words(record.array):null;
       if(records)prunePlantRecords(records,generation);
       for(let i=0;i<count;i++){
-       const recordKey=records?plantRecordKey(matrixWords,plantWords,recordWords,i):0,previous=matchingPlantRecord(records,recordKey,matrices,plant?.array,record?.array,i,generation);let b=previous?.bound;
+       const recordKey=records?plantRecordKey(matrixWords,plantWords,recordWords,i):0,previous=matchingPlantRecord(records,recordKey,matrices,plant?.array,record?.array,i,generation,stats);let b=previous?.bound;
        if(previous){previous.generation=generation;stats.plantRecordHits++;}
        else{
         const matrix=multiply(node.matrixWorld,matrices.subarray(i*16,i*16+16)),scale=Math.max(Math.hypot(...matrix.slice(0,3)),Math.hypot(...matrix.slice(4,7)),Math.hypot(...matrix.slice(8,11)));
