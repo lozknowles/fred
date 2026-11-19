@@ -11,6 +11,8 @@ import {createNativeUnderstoryIndex} from './NativeUnderstoryIndex.js';
 
 export const WEBGL_NATIVE_ISLAND_QUALIFICATION=Object.freeze({backend:'webgl2',backendQualification:'unqualified-optical-equivalence',waterModel:'source-parameter analytic swell with broken-up shore foam and detail normals',limitations:['Original FFT, refraction, swash simulation and underwater optics are not reproduced.','Near plants use original source geometry and exact records; distant crowns use reduced source card geometry, not the original octahedral atlases.','Leaf alpha, wind and terrain microshading are GLSL approximations; grass density is applied to the ground without individual grass blades.']});
 const fract=x=>x-Math.floor(x),UP=new T.Vector3(0,1,0);
+// Compare rounded upload words, including signed zero, without per-record storage.
+function copyChangedPlantWords(source,start,target,offset,length){let changed=false;for(let i=0;i<length;i++)if(target[offset+i]!==source[start+i]){target[offset+i]=source[start+i];changed=true;}return changed;}
 export function nativePlantPoseMatrix(record,out=new T.Matrix4(),canopy=false){return out.compose(new T.Vector3(record.x,record.y,record.z),new T.Quaternion().setFromAxisAngle(UP,record.yaw),new T.Vector3(record.s,record.s*(canopy?Math.abs(record.sy??1):1),record.s));}
 /** Copies the ORIGINAL installed geometry including source part/deformation attributes. */
 export function convertNativePlantGeometry(source,{leafStride=1}={}){
@@ -176,7 +178,7 @@ function buildPlants(source,time,detail,materials,mainCamera){
   }
  }
  let lastProof=null,lastCanopyProof=false,lastHadProof=false;const lastVP=new T.Matrix4(),lastProjection=new T.Matrix4(),lastRoot=new T.Matrix4(),identity=new T.Matrix4();
- const direction=new T.Vector3(),frustum=new T.Frustum(),vp=new T.Matrix4(),sphere=new T.Sphere();
+ const direction=new T.Vector3(),frustum=new T.Frustum(),vp=new T.Matrix4(),sphere=new T.Sphere(),upload=new Float32Array(24),uploadWords=new Uint32Array(upload.buffer);
  return{root,setOccluders(value){occlusion.setOccluders(value);lastCamera=null;},setOcclusionEnabled(value){occlusion.setEnabled(value);lastCamera=null;},updateView(camera,exactView=false){
   camera.getWorldDirection(direction);camera.updateMatrixWorld();vp.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
   occlusion.prepare(camera,root);root.updateWorldMatrix(true,false);
@@ -193,7 +195,11 @@ function buildPlants(source,time,detail,materials,mainCamera){
   frustum.setFromProjectionMatrix(vp);occlusion.resetCounters();displayed=0;
   const identityRoot=root.matrixWorld.equals(identity);
   for(const batch of batches){
-   const {mesh,occlusionCache}=batch,plant=mesh.geometry.getAttribute('iPlant'),recordAttr=mesh.geometry.getAttribute('iRecord');let count=0;
+   const {mesh,occlusionCache}=batch,plant=mesh.geometry.getAttribute('iPlant'),recordAttr=mesh.geometry.getAttribute('iRecord');let count=0,matrixDirty=false,plantDirty=false,recordDirty=false;
+   if(batch.matrixArray!==mesh.instanceMatrix.array||batch.plantArray!==plant.array||batch.recordArray!==recordAttr.array){
+    batch.matrixArray=mesh.instanceMatrix.array;batch.plantArray=plant.array;batch.recordArray=recordAttr.array;
+    const words=array=>new Uint32Array(array.buffer,array.byteOffset,array.length);batch.matrixWords=words(batch.matrixArray);batch.plantWords=words(batch.plantArray);batch.recordWords=words(batch.recordArray);
+    }
    if(batch.canopy&&proofActive&&!occlusionCache.poses){
     const n=batch.records.length;occlusionCache.poses=new Float32Array(n*16);occlusionCache.bounds=new Float64Array(n*4);
     for(let i=0;i<n;i++){nativePlantPoseMatrix(batch.records[i],matrix,true);matrix.toArray(occlusionCache.poses,i*16);nativeCanopyOcclusionSphere(mesh.geometry,batch.records[i],matrix,occlusionSphere);occlusionCache.bounds.set([occlusionSphere.center.x,occlusionSphere.center.y,occlusionSphere.center.z,occlusionSphere.radius],i*4);}
@@ -211,9 +217,14 @@ function buildPlants(source,time,detail,materials,mainCamera){
     }
     // Only canopy instances in a world with admitted proof retain cached poses.
     // Near/far share the Float32 upload pose; proof bounds use original doubles.
-    if(poses)matrix.fromArray(poses,i*16);else nativePlantPoseMatrix(r,matrix,batch.canopy);mesh.setMatrixAt(count,matrix);plant.setXYZW(count,(r.la??0)-r.yaw,r.l??0,(batch.species==='bananas'?.02:r.H??1)/Math.max(.001,r.s),r.seed);recordAttr.setXYZW(count,r.yaw,r.s,batch.canopy?1:0,0);count++;
+    if(poses)matrix.fromArray(poses,i*16);else nativePlantPoseMatrix(r,matrix,batch.canopy);matrix.toArray(upload);
+    upload[16]=(r.la??0)-r.yaw;upload[17]=r.l??0;upload[18]=(batch.species==='bananas'?.02:r.H??1)/Math.max(.001,r.s);upload[19]=r.seed;
+    upload[20]=r.yaw;upload[21]=r.s;upload[22]=batch.canopy?1:0;upload[23]=0;
+    matrixDirty=copyChangedPlantWords(uploadWords,0,batch.matrixWords,count*16,16)||matrixDirty;
+    plantDirty=copyChangedPlantWords(uploadWords,16,batch.plantWords,count*4,4)||plantDirty;
+    recordDirty=copyChangedPlantWords(uploadWords,20,batch.recordWords,count*4,4)||recordDirty;count++;
    }
-   mesh.count=count;mesh.instanceMatrix.needsUpdate=true;plant.needsUpdate=recordAttr.needsUpdate=true;displayed+=count;
+   mesh.count=count;if(matrixDirty)mesh.instanceMatrix.needsUpdate=true;if(plantDirty)plant.needsUpdate=true;if(recordDirty)recordAttr.needsUpdate=true;displayed+=count;
   }
 
  },stats:()=>({records:Object.values(source.records).filter(Array.isArray).reduce((n,a)=>n+a.length,0),displayed,batches:batches.length,occlusion:{...occlusion.stats(),retainedBytes:[...new Set(batches.map(b=>b.occlusionCache))].reduce((n,c)=>n+(c.poses?.byteLength??0)+(c.bounds?.byteLength??0),0)},farPolicy:'every eighth distant leaf card; unqualified atlas equivalence'}),dispose(){for(const batch of batches)batch.mesh.geometry.dispose();root.removeFromParent();}};
