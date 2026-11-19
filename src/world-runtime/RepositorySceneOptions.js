@@ -6,7 +6,7 @@ export function repositorySceneOptions(project,loaded,{renderer,backend,water,ca
   if(typeof loaded?.splatSceneRead!=='function')throw Error('Splat scene requires its verified repository resource reader.');
   return {splatScene:{read:loaded.splatSceneRead,renderer}};
  }
- const options=nativeIslandSceneOptions(project,loaded,water);
+ const options=nativeIslandSceneOptions(project,loaded,water,{captureWebGLCanopy:backend==='webgl2'});
  // Host preparation uses an isolated camera clone. Occlusion admission must use
  // the renderer's actual main camera, never that temporary preparation view.
  if(options.nativeIsland&&backend==='webgl2'&&camera)options.nativeIsland.mainCamera=camera;
