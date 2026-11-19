@@ -20,11 +20,12 @@ test('WebGL native scene batches exact records and gates arrival; diagnostics re
  // the render pass selects the follow camera. Tile and wind updates still run.
  const batches=[];root.traverse(node=>{if(node.userData.nativePlantSpecies)batches.push(node);});
  const versions=batches.map(node=>node.instanceMatrix.version);
+ const previous=batches.map(node=>new Uint32Array(node.instanceMatrix.array.buffer).slice());
  const follow=camera.clone();follow.position.x+=5;follow.updateMatrixWorld();
  native.update(1/60,follow,false);
  assert.deepEqual(batches.map(node=>node.instanceMatrix.version),versions);
  native.bindView(follow);
- assert.ok(batches.every((node,i)=>node.instanceMatrix.version>versions[i]));
+ batches.forEach((node,i)=>{const active=new Uint32Array(node.instanceMatrix.array.buffer,0,node.count*16),changed=active.some((word,k)=>word!==previous[i][k]);assert.equal(node.instanceMatrix.version,versions[i]+(changed?1:0),'follow view uploads only changed active pose bytes');});
  const drawn=batches.map(node=>node.instanceMatrix.version);
  native.bindView(follow);assert.deepEqual(batches.map(node=>node.instanceMatrix.version),drawn);
  root.traverse(node=>{if(!node.material?.onBeforeCompile)return;const shader={vertexShader:T.ShaderLib.standard.vertexShader,fragmentShader:T.ShaderLib.standard.fragmentShader,uniforms:{}};node.material.onBeforeCompile(shader);assert.ok(shader.vertexShader);assert.ok(shader.fragmentShader);});native.dispose();assert.equal(root.children.length,0);

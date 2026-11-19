@@ -8,9 +8,20 @@ import * as Plants from '../world/vegetation/PlantGeometry.js';
 import {createNativePlantOcclusion,nativeCanopyOcclusionSphere} from './NativePlantOcclusion.js';
 import {loadNativeLeafAtlas,NATIVE_VEGETATION_SURFACE_GLSL,NATIVE_CANOPY_COLOR_GLSL} from './NativeVegetation.js';
 import {createNativeUnderstoryIndex} from './NativeUnderstoryIndex.js';
+import {filterNativeCanopyCollection} from './NativeCanopyCapture.js';
+import {createNativeCanopyIndex} from './NativeCanopyIndex.js';
 
 export const WEBGL_NATIVE_ISLAND_QUALIFICATION=Object.freeze({backend:'webgl2',backendQualification:'unqualified-optical-equivalence',waterModel:'source-parameter analytic swell with broken-up shore foam and detail normals',limitations:['Original FFT, refraction, swash simulation and underwater optics are not reproduced.','Near plants use original source geometry and exact records; distant crowns use reduced source card geometry, not the original octahedral atlases.','Leaf alpha, wind and terrain microshading are GLSL approximations; grass density is applied to the ground without individual grass blades.']});
 const fract=x=>x-Math.floor(x),UP=new T.Vector3(0,1,0);
+// Compare rounded upload words, including signed zero, without per-record storage.
+function copyChangedPlantWords(source,start,target,offset,length){let changed=false;for(let i=0;i<length;i++)if(target[offset+i]!==source[start+i]){target[offset+i]=source[start+i];changed=true;}return changed;}
+// Captured cohort poses are owner-written once. Replacing their array reacquires
+// the view; NaN cohorts retain the numeric Matrix4 roundtrip's payload behavior.
+export function cachedNativePlantPoseWords(cache){
+ const poses=cache.poses;
+ if(cache.poseWordSource!==poses){cache.poseWordSource=poses;cache.poseWords=poses&&!poses.some(Number.isNaN)?new Uint32Array(poses.buffer,poses.byteOffset,poses.length):null;}
+ return cache.poseWords??null;
+}
 export function nativePlantPoseMatrix(record,out=new T.Matrix4(),canopy=false){return out.compose(new T.Vector3(record.x,record.y,record.z),new T.Quaternion().setFromAxisAngle(UP,record.yaw),new T.Vector3(record.s,record.s*(canopy?Math.abs(record.sy??1):1),record.s));}
 /** Copies the ORIGINAL installed geometry including source part/deformation attributes. */
 export function convertNativePlantGeometry(source,{leafStride=1}={}){
@@ -159,24 +170,25 @@ function plantMaterial(kind,time,wind,gust,detail,bark,leafAtlas){
 }
 function buildPlants(source,time,detail,materials,mainCamera){
  const occlusion=createNativePlantOcclusion(mainCamera),occlusionSphere=new T.Sphere();
- const root=new T.Group(),batches=[],matrix=new T.Matrix4();let displayed=0,lastPos=new T.Vector3(Infinity,Infinity,Infinity),lastDirection=new T.Vector3(),lastCamera=null;
+ const root=new T.Group(),batches=[],canopyIndexes=[],matrix=new T.Matrix4();let displayed=0,lastPos=new T.Vector3(Infinity,Infinity,Infinity),lastDirection=new T.Vector3(),lastCamera=null,selectionGeneration=0;
  const specs={palms:[Plants.buildPalmNear,120,2800,false],youngPalms:[Plants.buildYoungPalm,0,140,false],ferns:[Plants.buildFern,0,58,false],bananas:[Plants.buildBanana,0,120,false],monsteras:[Plants.buildMonstera,0,105,false],elephantEars:[Plants.buildElephantEar,0,105,false],heliconias:[Plants.buildHeliconia,0,105,false],strelitzias:[Plants.buildStrelitzia,0,105,false],trees:[Plants.buildTreeNear,65,2800,true],shrubs:[Plants.buildShrubNear,45,2800,true]};
  for(const [species,[factory,near,far,canopy]] of Object.entries(specs)){
   const variants=canopy?(species==='trees'?3:2):species==='bananas'?2:1;
   for(let variant=0;variant<variants;variant++){
-   const records=source.records[species].filter(r=>canopy?Math.floor(fract(r.seed*7.77)*variants)===variant:species==='bananas'?(r.seed<.5?0:1)===variant:true);if(!records.length)continue;
+   const collection=source.records[species],records=filterNativeCanopyCollection(collection,r=>canopy?Math.floor(fract(r.seed*7.77)*variants)===variant:species==='bananas'?(r.seed<.5?0:1)===variant:true);if(!records.length)continue;
    const occlusionCache={poses:null,bounds:null},understoryIndex=!canopy&&far<=140?createNativeUnderstoryIndex(records,far):null;
+   const canopyIndex=canopy?createNativeCanopyIndex(records):null,canopySelection={generation:0,result:null};if(canopyIndex)canopyIndexes.push(canopyIndex);
    const original=species==='bananas'?factory(variant?23:9):factory();const native=canopy?Plants.lobeVariantGeometry(original.geometry,Plants.LOBE_TABLE,(variant+(species==='shrubs'?Plants.TREE_VARIANTS:0))*8):original.geometry;
    for(const distant of near?[false,true]:[false]){
     const farPalm=species==='palms'&&distant?Plants.buildPalmFar().geometry:null;const geometry=convertNativePlantGeometry(farPalm??native,{leafStride:distant?(canopy?8:1):1}),count=records.length;if(farPalm)farPalm.dispose();geometry.setAttribute('iPlant',new T.InstancedBufferAttribute(new Float32Array(count*4),4));geometry.setAttribute('iRecord',new T.InstancedBufferAttribute(new Float32Array(count*4),4));
 
-    const mesh=new T.InstancedMesh(geometry,materials[canopy?'tree':'palm'],count);mesh.count=0;mesh.frustumCulled=false;mesh.userData.mediaOcclusionPlant=canopy?'native-canopy-v1':'native-palm-v1';mesh.userData.nativePlantSpecies=species;mesh.userData.nativePlantDistant=distant;root.add(mesh);batches.push({mesh,records,occlusionCache,understoryIndex,species,canopy,distant,near,far});
+    const mesh=new T.InstancedMesh(geometry,materials[canopy?'tree':'palm'],count);mesh.count=0;mesh.frustumCulled=false;mesh.userData.mediaOcclusionPlant=canopy?'native-canopy-v1':'native-palm-v1';mesh.userData.nativePlantSpecies=species;mesh.userData.nativePlantDistant=distant;root.add(mesh);batches.push({mesh,records,occlusionCache,understoryIndex,canopyIndex,canopySelection,species,canopy,distant,near,far});
    }
    if(native!==original.geometry)native.dispose();original.geometry.dispose();
   }
  }
  let lastProof=null,lastCanopyProof=false,lastHadProof=false;const lastVP=new T.Matrix4(),lastProjection=new T.Matrix4(),lastRoot=new T.Matrix4(),identity=new T.Matrix4();
- const direction=new T.Vector3(),frustum=new T.Frustum(),vp=new T.Matrix4(),sphere=new T.Sphere();
+ const direction=new T.Vector3(),frustum=new T.Frustum(),vp=new T.Matrix4(),sphere=new T.Sphere(),upload=new Float32Array(24),uploadWords=new Uint32Array(upload.buffer);
  return{root,setOccluders(value){occlusion.setOccluders(value);lastCamera=null;},setOcclusionEnabled(value){occlusion.setEnabled(value);lastCamera=null;},updateView(camera,exactView=false){
   camera.getWorldDirection(direction);camera.updateMatrixWorld();vp.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
   occlusion.prepare(camera,root);root.updateWorldMatrix(true,false);
@@ -190,17 +202,22 @@ function buildPlants(source,time,detail,materials,mainCamera){
    if(!proofActive&&!lastHadProof&&(alternate||exactView?lastVP.equals(vp):lastProjection.equals(camera.projectionMatrix)&&lastPos.distanceToSquared(camera.position)<16&&lastDirection.dot(direction)>.998))return;
   }
   lastCamera=camera;lastPos.copy(camera.position);lastDirection.copy(direction);lastVP.copy(vp);lastProjection.copy(camera.projectionMatrix);lastRoot.copy(root.matrixWorld);lastProof=occlusion.signature;lastCanopyProof=canopyProof;lastHadProof=proofActive;
-  frustum.setFromProjectionMatrix(vp);occlusion.resetCounters();displayed=0;
+  frustum.setFromProjectionMatrix(vp);occlusion.resetCounters();displayed=0;selectionGeneration++;
   const identityRoot=root.matrixWorld.equals(identity);
   for(const batch of batches){
-   const {mesh,occlusionCache}=batch,plant=mesh.geometry.getAttribute('iPlant'),recordAttr=mesh.geometry.getAttribute('iRecord');let count=0;
+   const {mesh,occlusionCache}=batch,plant=mesh.geometry.getAttribute('iPlant'),recordAttr=mesh.geometry.getAttribute('iRecord');let count=0,matrixDirty=false,plantDirty=false,recordDirty=false;
+   if(batch.matrixArray!==mesh.instanceMatrix.array||batch.plantArray!==plant.array||batch.recordArray!==recordAttr.array){
+    batch.matrixArray=mesh.instanceMatrix.array;batch.plantArray=plant.array;batch.recordArray=recordAttr.array;
+    const words=array=>new Uint32Array(array.buffer,array.byteOffset,array.length);batch.matrixWords=words(batch.matrixArray);batch.plantWords=words(batch.plantArray);batch.recordWords=words(batch.recordArray);
+    }
    if(batch.canopy&&proofActive&&!occlusionCache.poses){
     const n=batch.records.length;occlusionCache.poses=new Float32Array(n*16);occlusionCache.bounds=new Float64Array(n*4);
     for(let i=0;i<n;i++){nativePlantPoseMatrix(batch.records[i],matrix,true);matrix.toArray(occlusionCache.poses,i*16);nativeCanopyOcclusionSphere(mesh.geometry,batch.records[i],matrix,occlusionSphere);occlusionCache.bounds.set([occlusionSphere.center.x,occlusionSphere.center.y,occlusionSphere.center.z,occlusionSphere.radius],i*4);}
    }
-   const poses=occlusionCache.poses,canopyBounds=occlusionCache.bounds,candidates=batch.understoryIndex?.query(camera.position.x,camera.position.z);
-   for(let candidate=0,n=candidates?.length??batch.records.length;candidate<n;candidate++){
-    const i=candidates?candidates[candidate]:candidate;
+   if(batch.canopyIndex&&batch.canopySelection.generation!==selectionGeneration){batch.canopySelection.result=batch.canopyIndex.query(frustum);batch.canopySelection.generation=selectionGeneration;}
+   const canopyCandidates=batch.canopySelection.result,poses=occlusionCache.poses,poseWords=cachedNativePlantPoseWords(occlusionCache),canopyBounds=occlusionCache.bounds,candidates=batch.understoryIndex?.query(camera.position.x,camera.position.z);
+   for(let candidate=0,n=canopyCandidates?canopyCandidates.count:candidates?.length??batch.records.length;candidate<n;candidate++){
+    const i=canopyCandidates?canopyCandidates.ids[candidate]:candidates?candidates[candidate]:candidate;
     const r=batch.records[i],distance=Math.hypot(r.x-camera.position.x,r.z-camera.position.z);
     if(distance>batch.far||batch.near&&(batch.distant?distance<batch.near:distance>=batch.near))continue;
     sphere.center.set(r.x,r.y+(r.H??5)*.5,r.z);sphere.radius=Math.max(4,r.H??0)*r.s+4;if(!frustum.intersectsSphere(sphere))continue;
@@ -211,12 +228,17 @@ function buildPlants(source,time,detail,materials,mainCamera){
     }
     // Only canopy instances in a world with admitted proof retain cached poses.
     // Near/far share the Float32 upload pose; proof bounds use original doubles.
-    if(poses)matrix.fromArray(poses,i*16);else nativePlantPoseMatrix(r,matrix,batch.canopy);mesh.setMatrixAt(count,matrix);plant.setXYZW(count,(r.la??0)-r.yaw,r.l??0,(batch.species==='bananas'?.02:r.H??1)/Math.max(.001,r.s),r.seed);recordAttr.setXYZW(count,r.yaw,r.s,batch.canopy?1:0,0);count++;
+    if(!poseWords){if(poses)matrix.fromArray(poses,i*16);else nativePlantPoseMatrix(r,matrix,batch.canopy);matrix.toArray(upload);}
+    upload[16]=(r.la??0)-r.yaw;upload[17]=r.l??0;upload[18]=(batch.species==='bananas'?.02:r.H??1)/Math.max(.001,r.s);upload[19]=r.seed;
+    upload[20]=r.yaw;upload[21]=r.s;upload[22]=batch.canopy?1:0;upload[23]=0;
+    matrixDirty=copyChangedPlantWords(poseWords??uploadWords,poseWords?i*16:0,batch.matrixWords,count*16,16)||matrixDirty;
+    plantDirty=copyChangedPlantWords(uploadWords,16,batch.plantWords,count*4,4)||plantDirty;
+    recordDirty=copyChangedPlantWords(uploadWords,20,batch.recordWords,count*4,4)||recordDirty;count++;
    }
-   mesh.count=count;mesh.instanceMatrix.needsUpdate=true;plant.needsUpdate=recordAttr.needsUpdate=true;displayed+=count;
+   mesh.count=count;if(matrixDirty)mesh.instanceMatrix.needsUpdate=true;if(plantDirty)plant.needsUpdate=true;if(recordDirty)recordAttr.needsUpdate=true;displayed+=count;
   }
 
- },stats:()=>({records:Object.values(source.records).filter(Array.isArray).reduce((n,a)=>n+a.length,0),displayed,batches:batches.length,occlusion:{...occlusion.stats(),retainedBytes:[...new Set(batches.map(b=>b.occlusionCache))].reduce((n,c)=>n+(c.poses?.byteLength??0)+(c.bounds?.byteLength??0),0)},farPolicy:'every eighth distant leaf card; unqualified atlas equivalence'}),dispose(){for(const batch of batches)batch.mesh.geometry.dispose();root.removeFromParent();}};
+ },stats:()=>({records:Object.values(source.records).filter(Array.isArray).reduce((n,a)=>n+a.length,0),displayed,batches:batches.length,canopyIndex:canopyIndexes.map(index=>index.stats()),occlusion:{...occlusion.stats(),retainedBytes:[...new Set(batches.map(b=>b.occlusionCache))].reduce((n,c)=>n+(c.poses?.byteLength??0)+(c.bounds?.byteLength??0),0)},farPolicy:'every eighth distant leaf card; unqualified atlas equivalence'}),dispose(){for(const index of canopyIndexes)index.dispose();for(const batch of batches)batch.mesh.geometry.dispose();root.removeFromParent();}};
 }
 export function terrainMaterial({normal,splat,rect,domain,detail,shore,grass,ready,coarse,time,windDirection=0}){
  const material=new T.MeshStandardMaterial({color:'#ffffff',roughness:.9,side:T.DoubleSide});
