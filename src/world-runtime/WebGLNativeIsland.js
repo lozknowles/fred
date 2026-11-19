@@ -13,6 +13,13 @@ export const WEBGL_NATIVE_ISLAND_QUALIFICATION=Object.freeze({backend:'webgl2',b
 const fract=x=>x-Math.floor(x),UP=new T.Vector3(0,1,0);
 // Compare rounded upload words, including signed zero, without per-record storage.
 function copyChangedPlantWords(source,start,target,offset,length){let changed=false;for(let i=0;i<length;i++)if(target[offset+i]!==source[start+i]){target[offset+i]=source[start+i];changed=true;}return changed;}
+// Captured cohort poses are owner-written once. Replacing their array reacquires
+// the view; NaN cohorts retain the numeric Matrix4 roundtrip's payload behavior.
+export function cachedNativePlantPoseWords(cache){
+ const poses=cache.poses;
+ if(cache.poseWordSource!==poses){cache.poseWordSource=poses;cache.poseWords=poses&&!poses.some(Number.isNaN)?new Uint32Array(poses.buffer,poses.byteOffset,poses.length):null;}
+ return cache.poseWords??null;
+}
 export function nativePlantPoseMatrix(record,out=new T.Matrix4(),canopy=false){return out.compose(new T.Vector3(record.x,record.y,record.z),new T.Quaternion().setFromAxisAngle(UP,record.yaw),new T.Vector3(record.s,record.s*(canopy?Math.abs(record.sy??1):1),record.s));}
 /** Copies the ORIGINAL installed geometry including source part/deformation attributes. */
 export function convertNativePlantGeometry(source,{leafStride=1}={}){
@@ -204,7 +211,7 @@ function buildPlants(source,time,detail,materials,mainCamera){
     const n=batch.records.length;occlusionCache.poses=new Float32Array(n*16);occlusionCache.bounds=new Float64Array(n*4);
     for(let i=0;i<n;i++){nativePlantPoseMatrix(batch.records[i],matrix,true);matrix.toArray(occlusionCache.poses,i*16);nativeCanopyOcclusionSphere(mesh.geometry,batch.records[i],matrix,occlusionSphere);occlusionCache.bounds.set([occlusionSphere.center.x,occlusionSphere.center.y,occlusionSphere.center.z,occlusionSphere.radius],i*4);}
    }
-   const poses=occlusionCache.poses,canopyBounds=occlusionCache.bounds,candidates=batch.understoryIndex?.query(camera.position.x,camera.position.z);
+   const poses=occlusionCache.poses,poseWords=cachedNativePlantPoseWords(occlusionCache),canopyBounds=occlusionCache.bounds,candidates=batch.understoryIndex?.query(camera.position.x,camera.position.z);
    for(let candidate=0,n=candidates?.length??batch.records.length;candidate<n;candidate++){
     const i=candidates?candidates[candidate]:candidate;
     const r=batch.records[i],distance=Math.hypot(r.x-camera.position.x,r.z-camera.position.z);
@@ -217,10 +224,10 @@ function buildPlants(source,time,detail,materials,mainCamera){
     }
     // Only canopy instances in a world with admitted proof retain cached poses.
     // Near/far share the Float32 upload pose; proof bounds use original doubles.
-    if(poses)matrix.fromArray(poses,i*16);else nativePlantPoseMatrix(r,matrix,batch.canopy);matrix.toArray(upload);
+    if(!poseWords){if(poses)matrix.fromArray(poses,i*16);else nativePlantPoseMatrix(r,matrix,batch.canopy);matrix.toArray(upload);}
     upload[16]=(r.la??0)-r.yaw;upload[17]=r.l??0;upload[18]=(batch.species==='bananas'?.02:r.H??1)/Math.max(.001,r.s);upload[19]=r.seed;
     upload[20]=r.yaw;upload[21]=r.s;upload[22]=batch.canopy?1:0;upload[23]=0;
-    matrixDirty=copyChangedPlantWords(uploadWords,0,batch.matrixWords,count*16,16)||matrixDirty;
+    matrixDirty=copyChangedPlantWords(poseWords??uploadWords,poseWords?i*16:0,batch.matrixWords,count*16,16)||matrixDirty;
     plantDirty=copyChangedPlantWords(uploadWords,16,batch.plantWords,count*4,4)||plantDirty;
     recordDirty=copyChangedPlantWords(uploadWords,20,batch.recordWords,count*4,4)||recordDirty;count++;
    }

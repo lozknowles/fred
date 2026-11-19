@@ -1,10 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {T} from '../src/world-runtime/vendor/world-engine-contract.js';
-import {buildWebGLNativeIsland} from '../src/world-runtime/WebGLNativeIsland.js';
+import {buildWebGLNativeIsland,cachedNativePlantPoseWords} from '../src/world-runtime/WebGLNativeIsland.js';
 
 const names=['palms','youngPalms','ferns','bananas','monsteras','elephantEars','heliconias','strelitzias','trees','shrubs'];
 const words=array=>new Uint32Array(array.buffer,array.byteOffset,array.length);
+test('captured pose word views match the old numeric roundtrip, respect offsets and reacquire replacements',()=>{
+ const storage=new Uint32Array(40);storage.fill(0xdeadbeef);
+ const source=storage.subarray(4,36);for(let i=0;i<source.length;i++)source[i]=[0,0x80000000,0x7f800000,0xff800000,0x00000001,0x807fffff,0x3f800001,0xbf7fffff][i%8];
+ const poses=new Float32Array(storage.buffer,source.byteOffset,source.length),cache={poses},view=cachedNativePlantPoseWords(cache);
+ assert.equal(view.buffer,poses.buffer);assert.equal(view.byteOffset,poses.byteOffset);assert.equal(view.length,poses.length);assert.equal(cachedNativePlantPoseWords(cache),view,'cohort shares its view');
+ for(const offset of [0,16]){const old=new Float32Array(16);new T.Matrix4().fromArray(poses,offset).toArray(old);assert.deepEqual(view.subarray(offset,offset+16),words(old),'old cached conversion words at record '+offset/16);}
+ const replacement=new Float32Array(poses);cache.poses=replacement;const next=cachedNativePlantPoseWords(cache);assert.notEqual(next,view);assert.equal(next.buffer,replacement.buffer);
+ for(const payload of [0x7f800001,0x7fc12345,0xff800001,0xffc12345]){
+  const nanStorage=new Uint32Array(20);nanStorage.set(next.subarray(0,16),2);nanStorage[5]=payload;cache.poses=new Float32Array(nanStorage.buffer,8,16);
+  assert.equal(cachedNativePlantPoseWords(cache),null,'NaN cohort keeps the original numeric path');assert.equal(cachedNativePlantPoseWords(cache),null,'NaN fallback remains cached');
+  const old=new Float32Array(16);new T.Matrix4().fromArray(cache.poses).toArray(old);assert.ok(Number.isNaN(old[3]));
+ }
+ cache.poses=poses;assert.deepEqual(cachedNativePlantPoseWords(cache),view,'finite replacement rescans after NaN fallback');
+ cache.poses=null;assert.equal(cachedNativePlantPoseWords(cache),null);assert.equal(cache.poseWordSource,null);assert.equal(cache.poseWords,null,'clearing poses releases the old view and its array reference');
+ cache.poses=poses;const reacquired=cachedNativePlantPoseWords(cache);assert.notEqual(reacquired,view);assert.equal(reacquired.buffer,poses.buffer);assert.deepEqual(reacquired,view);
+});
 // Independent reference to the pre-gating expressions and writes. No runtime pose helper.
 function oldOutput(records,species,variant,distant,camera){
  const canopy=species==='trees'||species==='shrubs',near=species==='palms'?120:species==='trees'?65:species==='shrubs'?45:0;
@@ -39,6 +55,14 @@ test('native output gating preserves old Float32 words and independent dirty ver
   const steps=[[a,0,10,null],[b,.001,10,null],[a,0,10,[0,0,500,1000]],[b,0,10,null],[a,0,10,[500,0,500,1000]],[a,0,10,null],[b,10000,10000,null],[a,0,10,null],[main,0,-90,null],[b,0,10,null]];
   let nonempty=0,changed=0,unchanged=0,negativeZero=false;
   for(const [step,[camera,x,z,crop]]of steps.entries()){
+   if(step===3){
+    // This actual proof initializes shared near/far Float32 poses while its wall
+    // lies behind every source plant, so the independent selection stays valid.
+    const wall=new T.Mesh(new T.BoxGeometry(100,100,.5),new T.MeshStandardMaterial());wall.position.z=-500;root.add(wall);native.setPlantOccluders([wall]);
+    main.position.set(0,3,10);main.lookAt(0,2,-90);main.updateMatrixWorld();native.bindView(main);
+    assert.ok(native.stats().plants.occlusion.retainedBytes>0,'real main proof creates cached cohort poses');
+    native.setPlantOccluders([]);wall.removeFromParent();wall.geometry.dispose();wall.material.dispose();
+   }
    camera.clearViewOffset();camera.position.set(x,3,z);camera.lookAt(x,2,z-100);if(crop)camera.setViewOffset(1000,1000,...crop);camera.updateMatrixWorld();
    const before=metadata.map(({mesh})=>[mesh.instanceMatrix,mesh.geometry.getAttribute('iPlant'),mesh.geometry.getAttribute('iRecord')].map(attr=>({version:attr.version,bytes:words(attr.array).slice()})));
    const expected=metadata.map(({species,variant,distant})=>oldOutput(records[species],species,variant,distant,camera));
